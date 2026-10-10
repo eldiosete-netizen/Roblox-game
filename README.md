@@ -27,6 +27,13 @@ Juego de parkour contrarreloj: corre, desliza y salta por las paredes para conse
 
 ## Cómo meterlo en Roblox Studio
 
+### Opción rápida: abrir el archivo del juego
+1. Descarga `ParkourVelocidad.rbxlx` de este repositorio (botón **Download raw file** en GitHub).
+2. Haz doble clic en el archivo, o en Studio usa **File > Open from File**.
+3. Pulsa **Play**. El mapa aparece al empezar la partida (en modo edición no se ve, porque lo crea un script).
+
+Para regenerar el archivo después de cambiar el código: `rojo build -o ParkourVelocidad.rbxlx`.
+
 ### Opción A: con Rojo (recomendado)
 1. Instala [Rojo](https://rojo.space) y su plugin de Studio.
 2. En esta carpeta ejecuta `rojo serve`.
