@@ -57,17 +57,65 @@ local Config = {
 		WallJump = "rbxasset://sounds/swoosh.wav",
 		Land = "rbxasset://sounds/action_jump_land.mp3",
 		Wind = "rbxasset://sounds/action_falling.mp3",
+		Bounce = "rbxasset://sounds/action_jump.mp3",
+		Medal = "rbxasset://sounds/electronicpingshort.wav",
 	},
 
 	-- Carrera
 	CountdownSeconds = 3,
-	CourseHeight = 50, -- altura del circuito generado
+	CourseHeight = 50, -- altura a la que se generan lobby y mapas
+	MapSpacing = 300, -- separación entre mapas generados
 	FallY = 20, -- si caes por debajo de esta Y, vuelves al último checkpoint
 	MinValidTime = 5, -- tiempos más rápidos se consideran trampa
-	LeaderboardSize = 10,
-	LeaderboardRefresh = 60, -- segundos entre actualizaciones del ranking global
-	DataStoreName = "ParkourBestTimes_v1",
+	LeaderboardSize = 8,
+	LeaderboardRefresh = 120, -- segundos entre lecturas del ranking global
+
+	-- Obstáculos
+	TrampolinePower = 110,
+	LowGravityFactor = 0.35, -- 1 = gravedad normal
+	ZiplineMinSpeed = 30,
+	ZiplineMaxSpeed = 70,
+	ZiplineGrabDistance = 3.5,
+
+	-- Ajustes por defecto del jugador
+	DefaultSettings = {
+		shake = true, -- temblor de cámara
+		fov = true, -- efecto de velocidad en la cámara
+		ghost = true, -- mostrar el fantasma
+		wind = true, -- sonido de viento
+		hints = true, -- mostrar controles en pantalla
+	},
+
+	-- Guardado
+	DataStores = {
+		Player = "PlayerData_v1",
+		TimesPrefix = "Times_v1_",
+	},
+	AutosaveInterval = 120,
 }
+
+-- Medallas de mejor a peor. El tiempo de cada una se define por mapa.
+Config.Medals = {
+	{ id = "Dev", name = "Desarrollador", color = Color3.fromRGB(200, 90, 255) },
+	{ id = "Gold", name = "Oro", color = Color3.fromRGB(255, 205, 40) },
+	{ id = "Silver", name = "Plata", color = Color3.fromRGB(200, 210, 225) },
+	{ id = "Bronze", name = "Bronce", color = Color3.fromRGB(205, 127, 70) },
+}
+
+-- Rango de medalla: 4 = Desarrollador, 3 = Oro, 2 = Plata, 1 = Bronce, 0 = ninguna
+function Config.MedalRank(seconds: number, times: { [string]: number }): number
+	for i, medal in Config.Medals do
+		local limit = times[medal.id]
+		if limit and seconds <= limit then
+			return #Config.Medals - i + 1
+		end
+	end
+	return 0
+end
+
+function Config.MedalInfo(rank: number)
+	return Config.Medals[#Config.Medals - rank + 1]
+end
 
 function Config.FormatTime(seconds: number?): string
 	if not seconds then
@@ -83,6 +131,73 @@ return Config
         </Properties>
       </Item>
       <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">Remotes</string>
+          <string name="Source"><![CDATA[-- Todos los RemoteEvents/RemoteFunctions del juego en un solo sitio.
+-- El servidor los crea; el cliente espera a que existan.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local EVENTS = {
+	-- Carrera
+	"RaceCountdown", -- (mapId, seconds)
+	"RaceStarted", -- (mapId, totalCheckpoints, mode)
+	"CheckpointReached", -- (index, total, split, delta?)
+	"RaceFinished", -- (result)
+	"RaceCancelled", -- (reason?)
+	"RequestRestart",
+	"ReturnToLobby",
+	-- Datos
+	"DataSync", -- (snapshot)
+	"Notify", -- (text, color?)
+	"UpdateSetting", -- (key, value)
+	-- Competición
+	"GhostData", -- (mapId, encoded?)
+	"SubmitGhost", -- (mapId, encoded)
+	"LiveRaceUpdate", -- (status)
+}
+
+local FUNCTIONS = {
+	"RequestMap", -- (mapId) -> ok, message
+	"SetLiveRaceQueue", -- (join) -> ok, message
+	"Purchase", -- (itemId) -> ok, message
+	"Equip", -- (itemId) -> ok, message
+}
+
+local Remotes = {}
+
+if RunService:IsServer() then
+	local folder = Instance.new("Folder")
+	folder.Name = "Remotes"
+	for _, name in EVENTS do
+		local remote = Instance.new("RemoteEvent")
+		remote.Name = name
+		remote.Parent = folder
+		Remotes[name] = remote
+	end
+	for _, name in FUNCTIONS do
+		local remote = Instance.new("RemoteFunction")
+		remote.Name = name
+		remote.Parent = folder
+		Remotes[name] = remote
+	end
+	folder.Parent = ReplicatedStorage
+else
+	local folder = ReplicatedStorage:WaitForChild("Remotes")
+	for _, name in EVENTS do
+		Remotes[name] = folder:WaitForChild(name)
+	end
+	for _, name in FUNCTIONS do
+		Remotes[name] = folder:WaitForChild(name)
+	end
+end
+
+return Remotes :: { [string]: any }
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="4">
         <Properties>
           <string name="Name">Sfx</string>
           <string name="Source"><![CDATA[-- Reproduce sonidos 2D en el cliente (solo los oye el jugador local).
@@ -123,43 +238,35 @@ return Sfx
       </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="4">
+  <Item class="ServerScriptService" referent="5">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="5">
+    <Item class="Folder" referent="6">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">CourseBuilder</string>
-          <string name="Source"><![CDATA[-- Genera un circuito de prueba si en Workspace no hay una carpeta "Course".
--- Puedes construir tu propio mapa en Studio con la misma estructura:
---   Course/Spawn          (SpawnLocation)
---   Course/Start          (Part que inicia el tiempo al tocarla)
---   Course/Finish         (Part que para el tiempo)
---   Course/Checkpoints/*  (Parts con el atributo "Index" = 1, 2, 3...)
---   Course/KillParts/*    (opcional: Parts que te devuelven al checkpoint)
---   Course/Leaderboard    (opcional: Part donde se muestra el ranking)
+          <string name="Source"><![CDATA[-- Genera el lobby y los mapas si en Workspace no existe una carpeta "Maps".
+-- Puedes construir tus propios mapas en Studio con la estructura del README.
+--
+-- Cada mapa es una carpeta dentro de Workspace/Maps con atributos:
+--   DisplayName, Order, Color, Bronze, Silver, Gold, Dev (tiempos de medalla)
+--   Vip (solo VIP), Tutorial (sin ranking ni medallas)
+-- y estos hijos: StartPad, Start, Finish, Checkpoints/1..n
+-- Los obstáculos especiales se marcan con etiquetas (CollectionService):
+--   MovingPlatform, Trampoline, Zipline, LowGravity
 
+local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
 local CourseBuilder = {}
 
-local COLORS = {
-	Platform = Color3.fromRGB(230, 232, 240),
-	Runway = Color3.fromRGB(60, 64, 80),
-	Wall = Color3.fromRGB(255, 120, 40),
-	Start = Color3.fromRGB(0, 170, 255),
-	Checkpoint = Color3.fromRGB(0, 255, 140),
-	Finish = Color3.fromRGB(255, 210, 0),
-	Board = Color3.fromRGB(25, 25, 35),
-}
-
-local function newPart(className: string, props: { [string]: any }, parent: Instance): BasePart
+local function newPart(className: string, props: { [string]: any }, parent: Instance?): BasePart
 	local part = Instance.new(className) :: BasePart
 	part.Anchored = true
 	part.TopSurface = Enum.SurfaceType.Smooth
@@ -172,168 +279,517 @@ local function newPart(className: string, props: { [string]: any }, parent: Inst
 	return part
 end
 
-function CourseBuilder.build(): Folder
-	-- Desactiva otros spawns (p. ej. el de la plantilla Baseplate) para aparecer siempre en la salida
+local function billboard(part: BasePart, text: string, size: Vector2, offset: Vector3, color: Color3?)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromScale(size.X, size.Y)
+	gui.StudsOffsetWorldSpace = offset
+	gui.MaxDistance = 120
+	gui.Parent = part
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.TextColor3 = color or Color3.new(1, 1, 1)
+	label.TextStrokeTransparency = 0.3
+	label.Text = text
+	label.Parent = gui
+end
+
+-- Constructor de un mapa ---------------------------------------------------------
+-- Coordenadas locales: x = lateral, h = altura sobre la base, el cursor avanza
+-- hacia delante (-Z en el mundo, que es hacia donde mira el jugador).
+
+type Theme = { platform: Color3, runway: Color3, accent: Color3, wall: Color3, material: Enum.Material }
+
+local MapBuilder = {}
+MapBuilder.__index = MapBuilder
+
+function MapBuilder.new(parent: Instance, id: string, attributes: { [string]: any }, originX: number, theme: Theme)
+	local folder = Instance.new("Folder")
+	folder.Name = id
+	for name, value in attributes do
+		folder:SetAttribute(name, value)
+	end
+	local checkpoints = Instance.new("Folder")
+	checkpoints.Name = "Checkpoints"
+	checkpoints.Parent = folder
+	folder.Parent = parent
+
+	return setmetatable({
+		folder = folder,
+		checkpoints = checkpoints,
+		origin = Vector3.new(originX, Config.CourseHeight, 0),
+		cursor = 0,
+		count = 0,
+		theme = theme,
+	}, MapBuilder)
+end
+
+function MapBuilder:point(x: number, h: number, distance: number): Vector3
+	return self.origin + Vector3.new(x, h, -distance)
+end
+
+function MapBuilder:gap(distance: number)
+	self.cursor += distance
+end
+
+function MapBuilder:block(length: number, width: number, h: number, x: number?, color: Color3?): BasePart
+	local part = newPart("Part", {
+		Size = Vector3.new(width, 2, length),
+		Position = self:point(x or 0, h - 1, self.cursor + length / 2),
+		Color = color or self.theme.platform,
+		Material = self.theme.material,
+	}, self.folder)
+	self.cursor += length
+	return part
+end
+
+function MapBuilder:runway(length: number, h: number?): BasePart
+	return self:block(length, 12, h or 0, 0, self.theme.runway)
+end
+
+-- Detector invisible que cruza el circuito en la posición actual
+function MapBuilder:gate(name: string, width: number, h: number, color: Color3): BasePart
+	return newPart("Part", {
+		Name = name,
+		Size = Vector3.new(width, 10, 1),
+		Position = self:point(0, h + 5, self.cursor),
+		Color = color,
+		Material = Enum.Material.Neon,
+		Transparency = 0.6,
+		CanCollide = false,
+		CanQuery = false,
+	}, self.folder)
+end
+
+function MapBuilder:start()
+	newPart("Part", {
+		Name = "StartPad",
+		Size = Vector3.new(24, 2, 24),
+		Position = self:point(0, -1, 12),
+		Color = self.theme.runway,
+		Material = self.theme.material,
+	}, self.folder)
+	self.cursor = 24
+	self:gate("Start", 24, 0, Color3.fromRGB(0, 170, 255))
+end
+
+function MapBuilder:checkpoint(platform: BasePart)
+	self.count += 1
+	local cp = newPart("Part", {
+		Name = tostring(self.count),
+		Size = Vector3.new(platform.Size.X, 8, 2),
+		CFrame = CFrame.new(platform.Position + Vector3.new(0, platform.Size.Y / 2 + 4, 0)),
+		Color = Color3.fromRGB(0, 255, 140),
+		Material = Enum.Material.Neon,
+		Transparency = 0.6,
+		CanCollide = false,
+		CanQuery = false,
+	}, self.checkpoints)
+	cp:SetAttribute("Index", self.count)
+end
+
+function MapBuilder:finish(h: number)
+	self:gate("Finish", 24, h, Color3.fromRGB(255, 210, 0))
+	self:block(24, 24, h, 0, Color3.fromRGB(255, 210, 0))
+end
+
+-- Hueco con una pared al lado para el wall run. side: -1 izquierda, 1 derecha
+function MapBuilder:wallRun(side: number, length: number, h: number?): BasePart
+	local height = h or 0
+	newPart("Part", {
+		Name = "WallRun",
+		Size = Vector3.new(2, 24, length + 8),
+		Position = self:point(side * 8, height + 6, self.cursor + length / 2),
+		Color = self.theme.wall,
+		Material = self.theme.material,
+	}, self.folder)
+	self:gap(length)
+	return self:block(16, 16, height)
+end
+
+function MapBuilder:ramp(length: number, rise: number, h: number?)
+	local base = h or 0
+	newPart("Part", {
+		Name = "Ramp",
+		Size = Vector3.new(10, 1, math.sqrt(length ^ 2 + rise ^ 2)),
+		CFrame = CFrame.new(self:point(0, base + rise / 2 - 0.5, self.cursor + length / 2))
+			* CFrame.Angles(math.atan2(rise, length), 0, 0),
+		Color = self.theme.accent,
+		Material = self.theme.material,
+	}, self.folder)
+	self.cursor += length
+end
+
+-- Plataforma que te lanza hacia arriba
+function MapBuilder:trampoline(h: number, x: number?): BasePart
+	local pad = newPart("Part", {
+		Name = "Trampoline",
+		Size = Vector3.new(8, 1, 8),
+		Position = self:point(x or 0, h - 0.5, self.cursor + 4),
+		Color = Color3.fromRGB(255, 60, 180),
+		Material = Enum.Material.Neon,
+	}, self.folder)
+	pad:SetAttribute("Power", Config.TrampolinePower)
+	CollectionService:AddTag(pad, "Trampoline")
+	self.cursor += 8
+	return pad
+end
+
+-- Plataforma que se mueve de un lado a otro (la animan los clientes)
+function MapBuilder:moving(length: number, width: number, h: number, offset: Vector3, period: number, phase: number?): BasePart
+	local part = self:block(length, width, h, 0, self.theme.accent)
+	part.Name = "MovingPlatform"
+	part.Material = Enum.Material.Neon
+	part:SetAttribute("Offset", offset)
+	part:SetAttribute("Period", period)
+	part:SetAttribute("Phase", phase or 0)
+	CollectionService:AddTag(part, "MovingPlatform")
+	return part
+end
+
+-- Zona de gravedad baja que cubre los próximos "length" studs
+function MapBuilder:lowGravity(length: number, h: number)
+	local zone = newPart("Part", {
+		Name = "LowGravity",
+		Size = Vector3.new(40, 60, length),
+		Position = self:point(0, h + 20, self.cursor + length / 2),
+		Color = Color3.fromRGB(120, 80, 255),
+		Material = Enum.Material.ForceField,
+		Transparency = 0.5,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+	}, self.folder)
+	zone:SetAttribute("Gravity", Config.LowGravityFactor)
+	CollectionService:AddTag(zone, "LowGravity")
+end
+
+-- Tirolina desde el borde actual, bajando "drop" studs a lo largo de "length"
+function MapBuilder:zipline(length: number, drop: number, h: number)
+	local a = self:point(0, h + 7, self.cursor + 2)
+	local b = self:point(0, h + 7 - drop, self.cursor + length)
+	local rope = newPart("Part", {
+		Name = "Zipline",
+		Size = Vector3.new(0.3, 0.3, (b - a).Magnitude),
+		CFrame = CFrame.lookAt((a + b) / 2, b),
+		Color = Color3.fromRGB(40, 40, 40),
+		Material = Enum.Material.Metal,
+		CanCollide = false,
+		CanQuery = false,
+	}, self.folder)
+	rope:SetAttribute("A", a)
+	rope:SetAttribute("B", b)
+	CollectionService:AddTag(rope, "Zipline")
+
+	for _, point in { a, b } do
+		newPart("Part", {
+			Name = "ZiplinePole",
+			Size = Vector3.new(1, 12, 1),
+			Position = point + Vector3.new(3, -5, 0),
+			Color = self.theme.wall,
+			Material = Enum.Material.Metal,
+		}, self.folder)
+	end
+	self.cursor += length
+end
+
+function MapBuilder:sign(text: string, h: number)
+	local anchor = newPart("Part", {
+		Name = "Sign",
+		Size = Vector3.new(1, 1, 1),
+		Position = self:point(0, h + 9, self.cursor),
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+	}, self.folder)
+	billboard(anchor, text, Vector2.new(24, 4), Vector3.zero)
+end
+
+-- Mapas ------------------------------------------------------------------------------
+
+local THEMES: { [string]: Theme } = {
+	Ciudad = {
+		platform = Color3.fromRGB(230, 232, 240),
+		runway = Color3.fromRGB(60, 64, 80),
+		accent = Color3.fromRGB(0, 170, 255),
+		wall = Color3.fromRGB(255, 120, 40),
+		material = Enum.Material.SmoothPlastic,
+	},
+	Neon = {
+		platform = Color3.fromRGB(30, 30, 45),
+		runway = Color3.fromRGB(20, 20, 30),
+		accent = Color3.fromRGB(0, 255, 230),
+		wall = Color3.fromRGB(255, 0, 170),
+		material = Enum.Material.Glass,
+	},
+	Selva = {
+		platform = Color3.fromRGB(120, 90, 60),
+		runway = Color3.fromRGB(70, 110, 50),
+		accent = Color3.fromRGB(160, 220, 80),
+		wall = Color3.fromRGB(90, 140, 60),
+		material = Enum.Material.Wood,
+	},
+}
+
+-- Para añadir un mapa nuevo: añade una entrada aquí
+CourseBuilder.Definitions = {
+	{
+		id = "ciudad",
+		theme = THEMES.Ciudad,
+		attributes = {
+			DisplayName = "Ciudad",
+			Order = 1,
+			Color = THEMES.Ciudad.accent,
+			Bronze = 35,
+			Silver = 25,
+			Gold = 19,
+			Dev = 15,
+		},
+		build = function(m)
+			m:start()
+			m:runway(40)
+			for _, jump in { { 4, 1 }, { -4, 3 }, { 3, 5 }, { -3, 3 }, { 0, 1 } } do
+				m:gap(7)
+				m:block(8, 8, jump[2], jump[1])
+			end
+			m:gap(7)
+			m:checkpoint(m:block(16, 16, 0))
+			m:wallRun(-1, 34)
+			m:checkpoint(m:wallRun(1, 34))
+			m:runway(40)
+			m:ramp(16, 6)
+			m:gap(18)
+			m:checkpoint(m:block(20, 14, 2))
+			for _, step in { { -4, 6 }, { 4, 10 }, { -4, 14 }, { 2, 18 } } do
+				m:gap(5)
+				m:block(6, 6, step[2], step[1])
+			end
+			m:gap(6)
+			m:finish(20)
+		end,
+	},
+	{
+		id = "neon",
+		theme = THEMES.Neon,
+		attributes = {
+			DisplayName = "Neón",
+			Order = 2,
+			Color = THEMES.Neon.accent,
+			Bronze = 45,
+			Silver = 33,
+			Gold = 26,
+			Dev = 21,
+		},
+		build = function(m)
+			m:start()
+			m:runway(30)
+			m:gap(6)
+			m:moving(8, 8, 0, Vector3.new(10, 0, 0), 3)
+			m:gap(6)
+			m:moving(8, 8, 0, Vector3.new(10, 0, 0), 3, 0.5)
+			m:gap(6)
+			m:checkpoint(m:block(14, 14, 0))
+			m:trampoline(0)
+			m:gap(10)
+			m:block(20, 12, 18)
+			m:gap(8)
+			m:block(10, 10, 16)
+			m:gap(8)
+			m:block(10, 10, 14)
+			-- Gravedad baja: saltos largos
+			m:lowGravity(76, 0)
+			m:gap(20)
+			m:block(8, 8, 20)
+			m:gap(20)
+			m:block(8, 8, 12)
+			m:gap(20)
+			m:checkpoint(m:block(14, 14, 8))
+			m:wallRun(1, 34, 8)
+			m:checkpoint(m:wallRun(-1, 34, 8))
+			m:gap(6)
+			m:moving(8, 8, 8, Vector3.new(0, 10, 0), 4) -- ascensor
+			m:gap(6)
+			m:block(10, 10, 16)
+			m:gap(6)
+			m:finish(18)
+		end,
+	},
+	{
+		id = "selva",
+		theme = THEMES.Selva,
+		attributes = {
+			DisplayName = "Selva",
+			Order = 3,
+			Color = THEMES.Selva.accent,
+			Bronze = 50,
+			Silver = 38,
+			Gold = 30,
+			Dev = 24,
+		},
+		build = function(m)
+			m:start()
+			m:runway(30)
+			m:ramp(16, 6)
+			m:gap(16)
+			m:block(16, 14, 2)
+			m:gap(5)
+			m:block(6, 6, 6, -3)
+			m:gap(5)
+			m:block(6, 6, 10, 3)
+			m:gap(5)
+			m:checkpoint(m:block(12, 12, 14))
+			-- Tirolina: salta hacia el cable para engancharte
+			m:zipline(90, 12, 14)
+			m:block(20, 16, 0)
+			m:gap(6)
+			m:trampoline(0)
+			m:gap(10)
+			m:checkpoint(m:block(20, 12, 16))
+			m:wallRun(-1, 36, 12)
+			m:gap(6)
+			m:moving(8, 8, 12, Vector3.new(8, 0, 0), 2.5)
+			m:gap(6)
+			m:moving(8, 8, 12, Vector3.new(8, 0, 0), 2.5, 0.5)
+			m:gap(6)
+			m:checkpoint(m:block(14, 14, 12))
+			m:runway(30, 12)
+			m:ramp(16, 6, 12)
+			m:gap(18)
+			m:block(20, 14, 14)
+			m:gap(6)
+			m:finish(16)
+		end,
+	},
+}
+
+-- Lobby ------------------------------------------------------------------------------
+
+local function buildLobby(maps: { Folder }): Folder
+	local lobby = Instance.new("Folder")
+	lobby.Name = "Lobby"
+	local y = Config.CourseHeight
+
+	newPart("Part", {
+		Name = "Floor",
+		Size = Vector3.new(170, 2, 110),
+		Position = Vector3.new(0, y - 1, -10),
+		Color = Color3.fromRGB(45, 48, 62),
+	}, lobby)
+
+	newPart("SpawnLocation", {
+		Name = "Spawn",
+		Size = Vector3.new(12, 1, 12),
+		Position = Vector3.new(0, y + 0.5, 20),
+		Color = Color3.fromRGB(0, 170, 255),
+		Material = Enum.Material.Neon,
+		Neutral = true,
+		Duration = 0,
+	}, lobby)
+
+	local portals = Instance.new("Folder")
+	portals.Name = "Portals"
+	portals.Parent = lobby
+	local boards = Instance.new("Folder")
+	boards.Name = "Boards"
+	boards.Parent = lobby
+
+	table.sort(maps, function(a, b)
+		return (a:GetAttribute("Order") or 0) < (b:GetAttribute("Order") or 0)
+	end)
+
+	local spacing = 26
+	for i, map in maps do
+		local x = (i - (#maps + 1) / 2) * spacing
+		local z = -45
+		local color = map:GetAttribute("Color") or Color3.new(1, 1, 1)
+		local isVip = map:GetAttribute("Vip") == true
+
+		-- Marco del portal
+		for _, side in { -1, 1 } do
+			newPart("Part", {
+				Name = "Pillar",
+				Size = Vector3.new(2, 14, 2),
+				Position = Vector3.new(x + side * 7, y + 7, z),
+				Color = color,
+				Material = Enum.Material.Neon,
+			}, portals)
+		end
+		local top = newPart("Part", {
+			Name = "Top",
+			Size = Vector3.new(16, 2, 2),
+			Position = Vector3.new(x, y + 15, z),
+			Color = color,
+			Material = Enum.Material.Neon,
+		}, portals)
+		billboard(
+			top,
+			(if isVip then "⭐ VIP · " else "") .. (map:GetAttribute("DisplayName") or map.Name),
+			Vector2.new(14, 3),
+			Vector3.new(0, 3, 0)
+		)
+
+		local portal = newPart("Part", {
+			Name = "Portal",
+			Size = Vector3.new(12, 14, 1),
+			Position = Vector3.new(x, y + 7, z),
+			Color = color,
+			Material = Enum.Material.ForceField,
+			Transparency = 0.3,
+			CanCollide = false,
+		}, portals)
+		portal:SetAttribute("MapId", map.Name)
+
+		-- Ranking del mapa encima del portal
+		if not map:GetAttribute("Tutorial") then
+			local board = newPart("Part", {
+				Name = "Board",
+				Size = Vector3.new(18, 16, 1),
+				CFrame = CFrame.lookAt(Vector3.new(x, y + 28, z - 1), Vector3.new(x, y + 28, z + 10)),
+				Color = Color3.fromRGB(20, 20, 30),
+			}, boards)
+			board:SetAttribute("MapId", map.Name)
+		end
+	end
+
+	lobby.Parent = workspace
+	return lobby
+end
+
+function CourseBuilder.buildAll(): (Folder, Folder)
+	-- Desactiva otros spawns (p. ej. el de la plantilla Baseplate) para aparecer en el lobby
 	for _, descendant in workspace:GetDescendants() do
 		if descendant:IsA("SpawnLocation") then
 			descendant.Enabled = false
 		end
 	end
 
-	local course = Instance.new("Folder")
-	course.Name = "Course"
+	local mapsFolder = Instance.new("Folder")
+	mapsFolder.Name = "Maps"
+	mapsFolder.Parent = workspace
 
-	local checkpointsFolder = Instance.new("Folder")
-	checkpointsFolder.Name = "Checkpoints"
-	checkpointsFolder.Parent = course
-
-	local baseY = Config.CourseHeight
-	local cursor = 0 -- distancia recorrida hacia -Z (hacia donde mira el jugador al aparecer)
-	local checkpointCount = 0
-
-	-- Plataforma que empieza en el cursor y avanza "length" studs
-	local function block(length: number, width: number, height: number, x: number?, color: Color3?): BasePart
-		local part = newPart("Part", {
-			Size = Vector3.new(width, 2, length),
-			Position = Vector3.new(x or 0, baseY + height - 1, -(cursor + length / 2)),
-			Color = color or COLORS.Platform,
-		}, course)
-		cursor += length
-		return part
+	local built = {}
+	for i, definition in CourseBuilder.Definitions do
+		local builder = MapBuilder.new(mapsFolder, definition.id, definition.attributes, i * Config.MapSpacing, definition.theme)
+		definition.build(builder)
+		table.insert(built, builder.folder)
 	end
 
-	local function gap(distance: number)
-		cursor += distance
-	end
-
-	-- Puerta invisible (detector) en la posición actual del cursor
-	local function gate(name: string, width: number, color: Color3, floorY: number): BasePart
-		return newPart("Part", {
-			Name = name,
-			Size = Vector3.new(width, 10, 1),
-			Position = Vector3.new(0, floorY + 5, -cursor),
-			Color = color,
-			Material = Enum.Material.Neon,
-			Transparency = 0.6,
-			CanCollide = false,
-			CanQuery = false,
-		}, course)
-	end
-
-	local function checkpoint(platform: BasePart)
-		checkpointCount += 1
-		local cp = newPart("Part", {
-			Name = tostring(checkpointCount),
-			Size = Vector3.new(platform.Size.X, 8, 2),
-			CFrame = CFrame.new(platform.Position + Vector3.new(0, platform.Size.Y / 2 + 4, 0)),
-			Color = COLORS.Checkpoint,
-			Material = Enum.Material.Neon,
-			Transparency = 0.6,
-			CanCollide = false,
-			CanQuery = false,
-		}, checkpointsFolder)
-		cp:SetAttribute("Index", checkpointCount)
-	end
-
-	-- Hueco con una pared al lado para correr por ella. side: -1 izquierda, 1 derecha
-	local function wallRunSection(side: number, length: number): BasePart
-		newPart("Part", {
-			Name = "WallRun",
-			Size = Vector3.new(2, 24, length + 8),
-			Position = Vector3.new(side * 8, baseY + 6, -(cursor + length / 2)),
-			Color = COLORS.Wall,
-		}, course)
-		gap(length)
-		return block(16, 16, 0)
-	end
-
-	-- 1. Salida
-	newPart("SpawnLocation", {
-		Name = "Spawn",
-		Size = Vector3.new(24, 2, 24),
-		Position = Vector3.new(0, baseY - 1, -12),
-		Color = COLORS.Runway,
-		Neutral = true,
-		Duration = 0,
-	}, course)
-	cursor = 24
-	gate("Start", 24, COLORS.Start, baseY)
-
-	-- 2. Pista para coger velocidad
-	block(40, 12, 0, 0, COLORS.Runway)
-
-	-- 3. Saltos entre plataformas
-	local jumps = {
-		{ x = 4, h = 1 },
-		{ x = -4, h = 3 },
-		{ x = 3, h = 5 },
-		{ x = -3, h = 3 },
-		{ x = 0, h = 1 },
-	}
-	for _, jump in jumps do
-		gap(7)
-		block(8, 8, jump.h, jump.x)
-	end
-	gap(7)
-	checkpoint(block(16, 16, 0))
-
-	-- 4. Doble wall run (izquierda y luego derecha)
-	wallRunSection(-1, 34)
-	checkpoint(wallRunSection(1, 34))
-
-	-- 5. Rampa: hace falta ir rápido (o deslizarse) para pasar el hueco
-	block(40, 10, 0, 0, COLORS.Runway)
-	local rampLength, rampRise = 16, 6
-	newPart("Part", {
-		Name = "Ramp",
-		Size = Vector3.new(10, 1, math.sqrt(rampLength ^ 2 + rampRise ^ 2)),
-		CFrame = CFrame.new(0, baseY + rampRise / 2 - 0.5, -(cursor + rampLength / 2))
-			* CFrame.Angles(math.atan2(rampRise, rampLength), 0, 0),
-		Color = COLORS.Start,
-	}, course)
-	cursor += rampLength
-	gap(18)
-	checkpoint(block(20, 14, 2))
-
-	-- 6. Escalera final
-	local stairs = {
-		{ x = -4, h = 6 },
-		{ x = 4, h = 10 },
-		{ x = -4, h = 14 },
-		{ x = 2, h = 18 },
-	}
-	for _, step in stairs do
-		gap(5)
-		block(6, 6, step.h, step.x)
-	end
-
-	-- 7. Meta
-	gap(6)
-	gate("Finish", 24, COLORS.Finish, baseY + 20)
-	block(24, 24, 20, 0, COLORS.Finish)
-
-	-- Ranking global junto a la salida
-	newPart("Part", {
-		Name = "Leaderboard",
-		Size = Vector3.new(14, 12, 1),
-		CFrame = CFrame.lookAt(Vector3.new(16, baseY + 7, -12), Vector3.new(0, baseY + 7, -12)),
-		Color = COLORS.Board,
-	}, course)
-
-	course.Parent = workspace
-	return course
+	local lobby = buildLobby(built)
+	return mapsFolder, lobby
 end
 
 return CourseBuilder
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="7">
+      <Item class="ModuleScript" referent="8">
         <Properties>
           <string name="Name">Leaderboard</string>
-          <string name="Source"><![CDATA[-- Guarda los mejores tiempos (OrderedDataStore) y muestra el ranking global.
--- En Studio, activa "Enable Studio Access to API Services" para que se guarde.
--- Sin acceso a DataStore, el ranking sigue funcionando con los tiempos de la sesión.
+          <string name="Source"><![CDATA[-- Ranking global por mapa (OrderedDataStore) y carteles del lobby.
+-- Sin acceso a DataStore, el ranking funciona con los tiempos de la sesión.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -343,14 +799,47 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 
 local Leaderboard = {}
 
-local store: OrderedDataStore? = nil
-pcall(function()
-	store = DataStoreService:GetOrderedDataStore(Config.DataStoreName)
-end)
+export type Entry = { userId: number, name: string, seconds: number }
 
-local sessionBests: { [number]: number } = {}
+type Board = {
+	cached: { [string]: { [number]: number } }, -- último resultado del DataStore
+	session: { [string]: { [number]: number } }, -- tiempos de esta sesión
+	renderers: { () -> () },
+}
+
+local boards: { [string]: Board } = {}
 local names: { [number]: string } = {}
-local refreshCallbacks: { () -> () } = {}
+
+local PERIODS = { "all" }
+
+local function storeName(mapId: string, period: string): string
+	return Config.DataStores.TimesPrefix .. mapId
+end
+
+local function getBoard(mapId: string): Board
+	local board = boards[mapId]
+	if board then
+		return board
+	end
+	board = { cached = {}, session = {}, renderers = {} }
+	for _, period in PERIODS do
+		board.cached[period] = {}
+		board.session[period] = {}
+	end
+	boards[mapId] = board
+	return board
+end
+
+local storeCache: { [string]: any } = {} -- nombre -> OrderedDataStore | false
+
+local function getStore(mapId: string, period: string): OrderedDataStore?
+	local name = storeName(mapId, period)
+	if storeCache[name] == nil then
+		local ok, store = pcall(DataStoreService.GetOrderedDataStore, DataStoreService, name)
+		storeCache[name] = if ok then store else false
+	end
+	return storeCache[name] or nil
+end
 
 local function getName(userId: number): string
 	if names[userId] then
@@ -361,76 +850,79 @@ local function getName(userId: number): string
 	return names[userId]
 end
 
--- Devuelve el mejor tiempo guardado (en segundos) o nil
-function Leaderboard.loadBest(userId: number): number?
-	if not store then
-		return nil
+local function render(mapId: string)
+	for _, renderer in getBoard(mapId).renderers do
+		task.spawn(renderer)
 	end
-	local ok, value = pcall(function()
-		return store:GetAsync(tostring(userId))
-	end)
-	if ok and typeof(value) == "number" then
-		return value / 1000
-	end
-	return nil
 end
 
-function Leaderboard.submit(player: Player, seconds: number)
+function Leaderboard.submit(player: Player, mapId: string, seconds: number)
+	local board = getBoard(mapId)
 	local userId = player.UserId
 	names[userId] = player.Name
-	if not sessionBests[userId] or seconds < sessionBests[userId] then
-		sessionBests[userId] = seconds
-	end
+	local ms = math.floor(seconds * 1000 + 0.5)
 
-	if store then
-		local ms = math.floor(seconds * 1000 + 0.5)
-		task.spawn(function()
-			local ok, err = pcall(function()
-				store:UpdateAsync(tostring(userId), function(old)
-					if typeof(old) == "number" and old <= ms then
-						return nil -- el récord guardado ya es mejor
-					end
-					return ms
+	for _, period in PERIODS do
+		local session = board.session[period]
+		if not session[userId] or seconds < session[userId] then
+			session[userId] = seconds
+		end
+		local store = getStore(mapId, period)
+		if store then
+			task.spawn(function()
+				local ok, err = pcall(function()
+					store:UpdateAsync(tostring(userId), function(old)
+						if typeof(old) == "number" and old <= ms then
+							return nil
+						end
+						return ms
+					end)
 				end)
-			end)
-			if not ok then
-				warn("[Leaderboard] No se pudo guardar el tiempo:", err)
-			end
-		end)
-	end
-
-	for _, refresh in refreshCallbacks do
-		task.spawn(refresh)
-	end
-end
-
-export type Entry = { userId: number, name: string, seconds: number }
-
-function Leaderboard.getTop(count: number): { Entry }
-	local byUser: { [number]: number } = {}
-
-	if store then
-		local ok, pages = pcall(function()
-			return store:GetSortedAsync(true, count)
-		end)
-		if ok then
-			for _, item in pages:GetCurrentPage() do
-				local userId = tonumber(item.key)
-				if userId then
-					byUser[userId] = item.value / 1000
+				if not ok then
+					warn("[Leaderboard] No se pudo guardar el tiempo:", err)
 				end
-			end
+			end)
 		end
 	end
+	render(mapId)
+end
 
-	for userId, seconds in sessionBests do
-		if not byUser[userId] or seconds < byUser[userId] then
-			byUser[userId] = seconds
+-- Lee el DataStore (gasta peticiones; se llama cada LeaderboardRefresh)
+local function fetch(mapId: string, period: string)
+	local store = getStore(mapId, period)
+	if not store then
+		return
+	end
+	local ok, pages = pcall(function()
+		return store:GetSortedAsync(true, Config.LeaderboardSize)
+	end)
+	if not ok then
+		return
+	end
+	local result = {}
+	for _, item in pages:GetCurrentPage() do
+		local userId = tonumber(item.key)
+		if userId then
+			result[userId] = item.value / 1000
+		end
+	end
+	getBoard(mapId).cached[period] = result
+end
+
+function Leaderboard.getTop(mapId: string, period: string, count: number): { Entry }
+	local board = getBoard(mapId)
+	local merged: { [number]: number } = {}
+	for userId, seconds in board.cached[period] or {} do
+		merged[userId] = seconds
+	end
+	for userId, seconds in board.session[period] or {} do
+		if not merged[userId] or seconds < merged[userId] then
+			merged[userId] = seconds
 		end
 	end
 
 	local list = {}
-	for userId, seconds in byUser do
+	for userId, seconds in merged do
 		table.insert(list, { userId = userId, seconds = seconds, name = "" })
 	end
 	table.sort(list, function(a, b)
@@ -439,15 +931,27 @@ function Leaderboard.getTop(count: number): { Entry }
 
 	local result = {}
 	for i = 1, math.min(count, #list) do
-		local entry = list[i]
-		entry.name = getName(entry.userId)
-		result[i] = entry
+		list[i].name = getName(list[i].userId)
+		result[i] = list[i]
 	end
 	return result
 end
 
--- Crea un SurfaceGui con el top en la cara frontal de la Part
-function Leaderboard.startBoard(part: BasePart)
+local function makeLabel(parent: Instance, props: { [string]: any }): TextLabel
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.new(1, 1, 1)
+	for key, value in props do
+		(label :: any)[key] = value
+	end
+	label.Parent = parent
+	return label
+end
+
+-- Dibuja el ranking de un mapa en la cara frontal de una Part
+function Leaderboard.startBoard(part: BasePart, mapId: string, title: string, color: Color3)
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = Enum.NormalId.Front
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
@@ -460,62 +964,59 @@ function Leaderboard.startBoard(part: BasePart)
 	frame.BorderSizePixel = 0
 	frame.Parent = gui
 
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 20)
-	padding.PaddingLeft = UDim.new(0, 30)
-	padding.PaddingRight = UDim.new(0, 30)
-	padding.Parent = frame
+	makeLabel(frame, {
+		Size = UDim2.new(1, -40, 0, 70),
+		Position = UDim2.fromOffset(20, 10),
+		Font = Enum.Font.GothamBlack,
+		TextColor3 = color,
+		Text = "🏆 " .. title,
+	})
 
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 6)
-	layout.Parent = frame
+	local columns = {}
+	for i, period in PERIODS do
+		local column = Instance.new("Frame")
+		column.BackgroundTransparency = 1
+		column.Size = UDim2.new(1 / #PERIODS, -30, 1, -100)
+		column.Position = UDim2.new((i - 1) / #PERIODS, 20, 0, 90)
+		column.Parent = frame
 
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, 0, 0, 70)
-	title.BackgroundTransparency = 1
-	title.Font = Enum.Font.GothamBlack
-	title.TextScaled = true
-	title.TextColor3 = Color3.fromRGB(255, 210, 0)
-	title.Text = "🏆 MEJORES TIEMPOS"
-	title.LayoutOrder = 0
-	title.Parent = frame
+		local layout = Instance.new("UIListLayout")
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.Padding = UDim.new(0, 4)
+		layout.Parent = column
 
-	local rows = {}
-	for i = 1, Config.LeaderboardSize do
-		local row = Instance.new("TextLabel")
-		row.Size = UDim2.new(1, 0, 0, 34)
-		row.BackgroundTransparency = 1
-		row.Font = Enum.Font.GothamBold
-		row.TextScaled = true
-		row.TextXAlignment = Enum.TextXAlignment.Left
-		row.TextColor3 = if i <= 3 then Color3.fromRGB(255, 255, 255) else Color3.fromRGB(180, 180, 200)
-		row.Text = string.format("%d. ---", i)
-		row.LayoutOrder = i
-		row.Parent = frame
-		rows[i] = row
+		local rows = {}
+		for rank = 1, Config.LeaderboardSize do
+			rows[rank] = makeLabel(column, {
+				Size = UDim2.new(1, 0, 0, 52),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextColor3 = if rank <= 3 then Color3.new(1, 1, 1) else Color3.fromRGB(170, 170, 190),
+				Text = string.format("%d. ---", rank),
+				LayoutOrder = rank,
+			})
+		end
+		columns[period] = rows
 	end
 
-	local refreshing = false
-	local function refresh()
-		if refreshing then
-			return
+	local function draw()
+		for period, rows in columns do
+			local top = Leaderboard.getTop(mapId, period, Config.LeaderboardSize)
+			for rank, row in rows do
+				local entry = top[rank]
+				row.Text = if entry
+					then string.format("%d. %s  %s", rank, entry.name, Config.FormatTime(entry.seconds))
+					else string.format("%d. ---", rank)
+			end
 		end
-		refreshing = true
-		local top = Leaderboard.getTop(Config.LeaderboardSize)
-		for i, row in rows do
-			local entry = top[i]
-			row.Text = if entry
-				then string.format("%d. %s  —  %s", i, entry.name, Config.FormatTime(entry.seconds))
-				else string.format("%d. ---", i)
-		end
-		refreshing = false
 	end
-	table.insert(refreshCallbacks, refresh)
+	table.insert(getBoard(mapId).renderers, draw)
 
 	task.spawn(function()
 		while part.Parent do
-			refresh()
+			for period in columns do
+				fetch(mapId, period)
+			end
+			draw()
 			task.wait(Config.LeaderboardRefresh)
 		end
 	end)
@@ -525,84 +1026,490 @@ return Leaderboard
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="8">
+      <Item class="Script" referent="9">
         <Properties>
-          <string name="Name">RaceService</string>
+          <string name="Name">Main</string>
           <token name="RunContext">0</token>
-          <string name="Source"><![CDATA[-- Lógica de la carrera: salida, checkpoints, meta, caídas y récords.
--- El servidor es quien mide el tiempo oficial (el cliente solo lo muestra).
+          <string name="Source"><![CDATA[-- Arranque del servidor: crea los remotes, carga mapas y pone en marcha los sistemas.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
-local CourseBuilder = require(script.Parent:WaitForChild("CourseBuilder"))
-local Leaderboard = require(script.Parent:WaitForChild("Leaderboard"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+require(Shared:WaitForChild("Remotes")) -- crea los RemoteEvents antes que nada
 
--- Remotes (se crean primero para que los clientes los encuentren)
-local remotes = Instance.new("Folder")
-remotes.Name = "Remotes"
+local Server = script.Parent
+local PlayerData = require(Server:WaitForChild("PlayerData"))
+local Maps = require(Server:WaitForChild("Maps"))
+local Leaderboard = require(Server:WaitForChild("Leaderboard"))
+local RaceService = require(Server:WaitForChild("RaceService"))
 
-local function newRemote(name: string): RemoteEvent
-	local remote = Instance.new("RemoteEvent")
-	remote.Name = name
-	remote.Parent = remotes
-	return remote
-end
+Maps.init()
 
-local RaceCountdown = newRemote("RaceCountdown") -- (seconds)
-local RaceStarted = newRemote("RaceStarted") -- (totalCheckpoints)
-local CheckpointReached = newRemote("CheckpointReached") -- (index, total, splitTime)
-local RaceFinished = newRemote("RaceFinished") -- (time, bestTime, isNewRecord)
-local RaceCancelled = newRemote("RaceCancelled") -- (reason)
-local RequestRestart = newRemote("RequestRestart")
-remotes.Parent = ReplicatedStorage
-
--- Circuito
-local course = workspace:FindFirstChild("Course") or CourseBuilder.build()
-local spawnPart = course:WaitForChild("Spawn") :: BasePart
-local startGate = course:WaitForChild("Start") :: BasePart
-local finishGate = course:WaitForChild("Finish") :: BasePart
-
-local checkpoints: { BasePart } = {}
-for _, cp in course:WaitForChild("Checkpoints"):GetChildren() do
-	local index = cp:GetAttribute("Index")
-	if cp:IsA("BasePart") and typeof(index) == "number" then
-		checkpoints[index] = cp
+-- Carteles de ranking del lobby
+local boards = Maps.lobby():FindFirstChild("Boards")
+if boards then
+	for _, board in boards:GetChildren() do
+		local map = Maps.get(board:GetAttribute("MapId") or "")
+		if map and board:IsA("BasePart") then
+			Leaderboard.startBoard(board, map.id, map.name, map.folder:GetAttribute("Color") or Color3.new(1, 1, 1))
+		end
 	end
 end
-local totalCheckpoints = #checkpoints
 
-local board = course:FindFirstChild("Leaderboard")
-if board and board:IsA("BasePart") then
-	Leaderboard.startBoard(board)
+RaceService.init()
+
+-- Tabla de jugadores (leaderstats)
+local function countMedals(data): number
+	local total = 0
+	for _, mapData in data.maps do
+		total += mapData.medal or 0
+	end
+	return total
 end
 
-type State = {
+local function setupLeaderstats(player: Player)
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+	local medals = Instance.new("IntValue")
+	medals.Name = "Medallas"
+	medals.Parent = leaderstats
+	leaderstats.Parent = player
+end
+
+Players.PlayerAdded:Connect(setupLeaderstats)
+for _, player in Players:GetPlayers() do
+	setupLeaderstats(player)
+end
+
+-- Se ejecuta en cada sincronización de datos: actualiza la tabla de jugadores
+PlayerData.addSnapshotField(function(player, snapshot)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if leaderstats then
+		(leaderstats :: any).Medallas.Value = countMedals(snapshot)
+	end
+end)
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">Maps</string>
+          <string name="Source"><![CDATA[-- Registro de mapas: lee Workspace/Maps (o los genera) y el lobby.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local CourseBuilder = require(script.Parent:WaitForChild("CourseBuilder"))
+local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+
+export type MapInfo = {
+	id: string,
+	folder: Folder,
+	name: string,
+	order: number,
+	vip: boolean,
+	tutorial: boolean,
+	medals: { [string]: number },
+	startPad: BasePart,
+	startGate: BasePart,
+	finish: BasePart,
+	checkpoints: { BasePart },
+}
+
+local Maps = {}
+
+local list: { MapInfo } = {}
+local byId: { [string]: MapInfo } = {}
+local lobby: Instance
+
+local function parse(folder: Folder): MapInfo?
+	local startPad = folder:FindFirstChild("StartPad")
+	local startGate = folder:FindFirstChild("Start")
+	local finish = folder:FindFirstChild("Finish")
+	local checkpointsFolder = folder:FindFirstChild("Checkpoints")
+	if not (startPad and startGate and finish and checkpointsFolder) then
+		warn("[Maps] Al mapa", folder.Name, "le falta StartPad, Start, Finish o Checkpoints")
+		return nil
+	end
+
+	local checkpoints = {}
+	for _, cp in checkpointsFolder:GetChildren() do
+		local index = cp:GetAttribute("Index")
+		if cp:IsA("BasePart") and typeof(index) == "number" then
+			checkpoints[index] = cp
+		end
+	end
+
+	local medals = {}
+	for _, medal in Config.Medals do
+		local seconds = folder:GetAttribute(medal.id)
+		if typeof(seconds) == "number" then
+			medals[medal.id] = seconds
+		end
+	end
+
+	return {
+		id = folder.Name,
+		folder = folder,
+		name = folder:GetAttribute("DisplayName") or folder.Name,
+		order = folder:GetAttribute("Order") or 0,
+		vip = folder:GetAttribute("Vip") == true,
+		tutorial = folder:GetAttribute("Tutorial") == true,
+		medals = medals,
+		startPad = startPad,
+		startGate = startGate,
+		finish = finish,
+		checkpoints = checkpoints,
+	}
+end
+
+function Maps.init()
+	local mapsFolder = workspace:FindFirstChild("Maps")
+	if mapsFolder then
+		lobby = workspace:WaitForChild("Lobby")
+	else
+		mapsFolder, lobby = CourseBuilder.buildAll()
+	end
+
+	for _, folder in mapsFolder:GetChildren() do
+		if folder:IsA("Folder") then
+			local info = parse(folder)
+			if info then
+				table.insert(list, info)
+				byId[info.id] = info
+			end
+		end
+	end
+	table.sort(list, function(a, b)
+		return a.order < b.order
+	end)
+end
+
+function Maps.get(id: string): MapInfo?
+	return byId[id]
+end
+
+function Maps.list(): { MapInfo }
+	return list
+end
+
+function Maps.lobby(): Instance
+	return lobby
+end
+
+-- Posición encima de una plataforma, mirando hacia el circuito
+function Maps.onTop(part: BasePart, forward: number?): CFrame
+	return part.CFrame * CFrame.new(0, part.Size.Y / 2 + 3, -(forward or 0))
+end
+
+function Maps.lobbySpawn(): CFrame
+	local spawn = lobby:FindFirstChild("Spawn") :: BasePart
+	return Maps.onTop(spawn)
+end
+
+-- Justo delante de la línea de salida
+function Maps.startLine(map: MapInfo): CFrame
+	return map.startGate.CFrame * CFrame.new(0, -map.startGate.Size.Y / 2 + 3, -4)
+end
+
+function Maps.checkpointCFrame(cp: BasePart): CFrame
+	return cp.CFrame * CFrame.new(0, -cp.Size.Y / 2 + 3, 0)
+end
+
+return Maps
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="11">
+        <Properties>
+          <string name="Name">PlayerData</string>
+          <string name="Source"><![CDATA[-- Datos guardados de cada jugador (DataStore) y sincronización con su cliente.
+-- Si el DataStore no está disponible (Studio sin acceso a API), el juego
+-- funciona igual pero no se guarda nada entre sesiones.
+
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local PlayerData = {}
+
+local DEFAULT = {
+	coins = 0,
+	xp = 0,
+	maps = {}, -- [mapId] = { best = segundos, splits = {...}, medal = rango, runs = n }
+	owned = {}, -- [itemId] = true
+	equipped = {}, -- [tipo] = itemId
+	settings = {},
+	tutorialDone = false,
+}
+
+local store: DataStore? = nil
+pcall(function()
+	store = DataStoreService:GetDataStore(Config.DataStores.Player)
+end)
+
+type Profile = { data: { [string]: any }, canSave: boolean, dirty: boolean }
+
+local profiles: { [Player]: Profile } = {}
+local session: { [Player]: { [string]: any } } = {} -- datos que no se guardan (VIP, etc.)
+local snapshotBuilders: { (Player, { [string]: any }) -> () } = {}
+local loadedCallbacks: { (Player, { [string]: any }) -> () } = {}
+
+local function deepCopy(value: any): any
+	if typeof(value) ~= "table" then
+		return value
+	end
+	local copy = {}
+	for k, v in value do
+		copy[k] = deepCopy(v)
+	end
+	return copy
+end
+
+-- Añade los campos que falten (por ejemplo, tras una actualización del juego)
+local function reconcile(data: { [string]: any }, template: { [string]: any })
+	for key, value in template do
+		if data[key] == nil then
+			data[key] = deepCopy(value)
+		elseif typeof(value) == "table" and typeof(data[key]) == "table" then
+			reconcile(data[key], value)
+		end
+	end
+end
+
+local function key(player: Player): string
+	return "player_" .. player.UserId
+end
+
+function PlayerData.load(player: Player): { [string]: any }
+	local data = nil
+	local canSave = store ~= nil
+
+	if store then
+		for attempt = 1, 3 do
+			local ok, result = pcall(function()
+				return store:GetAsync(key(player))
+			end)
+			if ok then
+				data = result
+				break
+			elseif attempt == 3 then
+				warn("[PlayerData] No se pudieron cargar los datos de", player.Name, result)
+				canSave = false -- no sobrescribir datos buenos con datos vacíos
+			else
+				task.wait(1)
+			end
+		end
+	end
+
+	if typeof(data) ~= "table" then
+		data = {}
+	end
+	reconcile(data, DEFAULT)
+
+	profiles[player] = { data = data, canSave = canSave, dirty = false }
+	session[player] = session[player] or {}
+	for _, callback in loadedCallbacks do
+		task.spawn(callback, player, data)
+	end
+	PlayerData.sync(player)
+	return data
+end
+
+function PlayerData.get(player: Player): { [string]: any }?
+	local profile = profiles[player]
+	return profile and profile.data
+end
+
+-- Espera a que los datos estén cargados (máx. 10 s)
+function PlayerData.wait(player: Player): { [string]: any }?
+	local start = os.clock()
+	while not profiles[player] and player.Parent and os.clock() - start < 10 do
+		task.wait(0.1)
+	end
+	return PlayerData.get(player)
+end
+
+function PlayerData.session(player: Player): { [string]: any }
+	session[player] = session[player] or {}
+	return session[player]
+end
+
+function PlayerData.onLoaded(callback: (Player, { [string]: any }) -> ())
+	table.insert(loadedCallbacks, callback)
+end
+
+-- Otros módulos pueden añadir campos calculados a lo que recibe el cliente
+function PlayerData.addSnapshotField(builder: (Player, { [string]: any }) -> ())
+	table.insert(snapshotBuilders, builder)
+end
+
+local syncQueued: { [Player]: boolean } = {}
+
+-- Marca los datos como cambiados y los envía al cliente (agrupado por frame)
+function PlayerData.sync(player: Player)
+	local profile = profiles[player]
+	if not profile then
+		return
+	end
+	profile.dirty = true
+	if syncQueued[player] then
+		return
+	end
+	syncQueued[player] = true
+	task.defer(function()
+		syncQueued[player] = nil
+		local current = profiles[player]
+		if not current or not player.Parent then
+			return
+		end
+		local snapshot = deepCopy(current.data)
+		for _, builder in snapshotBuilders do
+			builder(player, snapshot)
+		end
+		Remotes.DataSync:FireClient(player, snapshot)
+	end)
+end
+
+function PlayerData.save(player: Player)
+	local profile = profiles[player]
+	if not profile or not profile.canSave or not profile.dirty or not store then
+		return
+	end
+	local ok, err = pcall(function()
+		store:SetAsync(key(player), profile.data, { player.UserId })
+	end)
+	if ok then
+		profile.dirty = false
+	else
+		warn("[PlayerData] No se pudieron guardar los datos de", player.Name, err)
+	end
+end
+
+function PlayerData.release(player: Player)
+	PlayerData.save(player)
+	profiles[player] = nil
+	session[player] = nil
+end
+
+-- task.defer: deja que los demás módulos registren sus callbacks antes de cargar
+Players.PlayerAdded:Connect(function(player)
+	task.defer(PlayerData.load, player)
+end)
+for _, player in Players:GetPlayers() do
+	task.defer(PlayerData.load, player)
+end
+Players.PlayerRemoving:Connect(PlayerData.release)
+
+-- El cliente pide sus datos al arrancar (por si se perdió el primer envío)
+Remotes.DataSync.OnServerEvent:Connect(function(player)
+	PlayerData.sync(player)
+end)
+
+task.spawn(function()
+	while true do
+		task.wait(Config.AutosaveInterval)
+		for player in profiles do
+			task.spawn(PlayerData.save, player)
+		end
+	end
+end)
+
+game:BindToClose(function()
+	local pending = 0
+	for player in profiles do
+		pending += 1
+		task.spawn(function()
+			PlayerData.save(player)
+			pending -= 1
+		end)
+	end
+	local start = os.clock()
+	while pending > 0 and os.clock() - start < 25 do
+		task.wait(0.1)
+	end
+end)
+
+return PlayerData
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="12">
+        <Properties>
+          <string name="Name">RaceService</string>
+          <string name="Source"><![CDATA[-- Lógica de las carreras: entrar en mapas, cuenta atrás, checkpoints, meta,
+-- caídas, récords y medallas. El servidor mide el tiempo oficial.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local Maps = require(script.Parent:WaitForChild("Maps"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local Leaderboard = require(script.Parent:WaitForChild("Leaderboard"))
+
+local RaceService = {}
+
+export type State = {
+	mapId: string?,
+	mode: string, -- "solo" o "live"
 	racing: boolean,
 	countdownToken: {}?,
 	startTime: number,
 	nextCheckpoint: number,
+	splits: { number },
 	respawnCFrame: CFrame,
-	best: number?,
 	lastStart: number,
 	lastRestart: number,
+	lastEnter: number,
+}
+
+export type Result = {
+	mapId: string,
+	time: number,
+	best: number,
+	previousBest: number?,
+	isRecord: boolean,
+	medal: number,
+	newMedal: boolean,
+	splits: { number },
+	mode: string,
+	rewards: { [string]: any },
 }
 
 local states: { [Player]: State } = {}
 
-local function spawnCFrame(): CFrame
-	return spawnPart.CFrame * CFrame.new(0, spawnPart.Size.Y / 2 + 3, 0)
+-- Ganchos para otros módulos
+local enterChecks: { (Player, Maps.MapInfo) -> (boolean, string?) } = {}
+local finishHandlers: { (Player, Maps.MapInfo, Result) -> () } = {}
+local leaveHandlers: { (Player) -> () } = {}
+
+function RaceService.addEnterCheck(check: (Player, Maps.MapInfo) -> (boolean, string?))
+	table.insert(enterChecks, check)
 end
 
--- Justo delante de la línea de salida (la cara frontal de "Start" mira hacia el circuito)
-local function startCFrame(): CFrame
-	return startGate.CFrame * CFrame.new(0, -startGate.Size.Y / 2 + 3, -4)
+-- Se llama al terminar, antes de avisar al cliente (puede rellenar result.rewards)
+function RaceService.onFinish(handler: (Player, Maps.MapInfo, Result) -> ())
+	table.insert(finishHandlers, handler)
 end
 
-local function checkpointCFrame(cp: BasePart): CFrame
-	return cp.CFrame * CFrame.new(0, -cp.Size.Y / 2 + 3, 0)
+-- Se llama cuando un jugador sale de su mapa (lobby, otro mapa, desconexión)
+function RaceService.onLeaveMap(handler: (Player) -> ())
+	table.insert(leaveHandlers, handler)
 end
+
+function RaceService.getState(player: Player): State?
+	return states[player]
+end
+
+-- Utilidades -----------------------------------------------------------------------
 
 local function playerFromHit(hit: BasePart): Player?
 	local model = hit:FindFirstAncestorOfClass("Model")
@@ -616,24 +1523,14 @@ local function playerFromHit(hit: BasePart): Player?
 	return Players:GetPlayerFromCharacter(model)
 end
 
-local function teleport(player: Player, cframe: CFrame)
+function RaceService.teleport(player: Player, cframe: CFrame)
 	local character = player.Character
 	if not character or not character:FindFirstChild("HumanoidRootPart") then
 		return
 	end
 	character:PivotTo(cframe)
-	-- Avisa al script de movimiento del cliente para que resetee la velocidad
-	player:SetAttribute("TeleportTick", (player:GetAttribute("TeleportTick") or 0) + 1)
-end
-
-local function setBest(player: Player, state: State, seconds: number)
-	state.best = seconds
-	player:SetAttribute("BestTime", seconds)
-	local leaderstats = player:FindFirstChild("leaderstats")
-	local value = leaderstats and leaderstats:FindFirstChild("Mejor")
-	if value then
-		(value :: StringValue).Value = Config.FormatTime(seconds)
-	end
+	-- Avisa al cliente para que resetee la velocidad
+	player:SetAttribute("TeleportTick", ((player:GetAttribute("TeleportTick") :: number?) or 0) + 1)
 end
 
 local function setFrozen(player: Player, frozen: boolean)
@@ -645,20 +1542,27 @@ local function setFrozen(player: Player, frozen: boolean)
 	end
 end
 
-local function resetState(player: Player, state: State)
+local function stopRace(player: Player, state: State)
 	if state.countdownToken then
 		state.countdownToken = nil
 		setFrozen(player, false)
 	end
 	state.racing = false
 	state.nextCheckpoint = 1
-	state.respawnCFrame = spawnCFrame()
+	table.clear(state.splits)
 end
 
--- Al cruzar la salida: te coloca en la línea, te congela y cuenta 3, 2, 1...
-local function beginCountdown(player: Player)
+local function currentMap(state: State): Maps.MapInfo?
+	return if state.mapId then Maps.get(state.mapId) else nil
+end
+
+-- Flujo de la carrera ----------------------------------------------------------------
+
+-- Coloca al jugador en la línea, lo congela y cuenta 3, 2, 1...
+function RaceService.beginCountdown(player: Player)
 	local state = states[player]
-	if not state or state.countdownToken then
+	local map = state and currentMap(state)
+	if not state or not map or state.countdownToken then
 		return
 	end
 	local now = os.clock()
@@ -667,111 +1571,174 @@ local function beginCountdown(player: Player)
 	end
 	state.lastStart = now
 
+	stopRace(player, state)
 	local token = {}
 	state.countdownToken = token
-	state.racing = false
-	state.nextCheckpoint = 1
-	state.respawnCFrame = startCFrame()
+	state.respawnCFrame = Maps.startLine(map)
 
-	teleport(player, startCFrame())
+	RaceService.teleport(player, Maps.startLine(map))
 	setFrozen(player, true)
-	RaceCountdown:FireClient(player, Config.CountdownSeconds)
+	Remotes.RaceCountdown:FireClient(player, map.id, Config.CountdownSeconds)
 
 	task.delay(Config.CountdownSeconds, function()
 		if states[player] ~= state or state.countdownToken ~= token then
-			return -- cancelada (reinicio, muerte o salida del juego)
+			return -- cancelada
 		end
 		state.countdownToken = nil
 		setFrozen(player, false)
 		state.racing = true
 		state.startTime = os.clock()
 		state.lastStart = state.startTime
-		RaceStarted:FireClient(player, totalCheckpoints)
+		Remotes.RaceStarted:FireClient(player, map.id, #map.checkpoints, state.mode)
 	end)
 end
 
-local function reachCheckpoint(player: Player, index: number)
+function RaceService.enterMap(player: Player, mapId: string, mode: string?): (boolean, string?)
 	local state = states[player]
-	if not state or not state.racing or index ~= state.nextCheckpoint then
-		return
+	local map = Maps.get(mapId)
+	if not state or not map then
+		return false, "Mapa no encontrado"
 	end
-	state.nextCheckpoint += 1
-	state.respawnCFrame = checkpointCFrame(checkpoints[index])
-	CheckpointReached:FireClient(player, index, totalCheckpoints, os.clock() - state.startTime)
+	for _, check in enterChecks do
+		local ok, message = check(player, map)
+		if not ok then
+			return false, message
+		end
+	end
+	local now = os.clock()
+	if now - state.lastEnter < 1 then
+		return false, nil
+	end
+	state.lastEnter = now
+
+	if state.mapId then
+		for _, handler in leaveHandlers do
+			handler(player)
+		end
+	end
+
+	stopRace(player, state)
+	state.mapId = map.id
+	state.mode = mode or "solo"
+	state.lastStart = 0
+	state.respawnCFrame = Maps.startLine(map)
+	player:SetAttribute("MapId", map.id)
+
+	if state.mode == "solo" then
+		RaceService.beginCountdown(player)
+	else
+		RaceService.teleport(player, Maps.startLine(map))
+	end
+	return true, nil
 end
 
-local function finishRace(player: Player)
+function RaceService.returnToLobby(player: Player)
 	local state = states[player]
-	if not state or not state.racing then
+	if not state then
 		return
 	end
-	if state.nextCheckpoint <= totalCheckpoints then
+	if state.mapId then
+		for _, handler in leaveHandlers do
+			handler(player)
+		end
+	end
+	stopRace(player, state)
+	state.mapId = nil
+	state.mode = "solo"
+	state.respawnCFrame = Maps.lobbySpawn()
+	player:SetAttribute("MapId", nil)
+	Remotes.RaceCancelled:FireClient(player, nil)
+	RaceService.teleport(player, Maps.lobbySpawn())
+end
+
+local function reachCheckpoint(player: Player, map: Maps.MapInfo, index: number)
+	local state = states[player]
+	if not state or state.mapId ~= map.id or not state.racing or index ~= state.nextCheckpoint then
+		return
+	end
+	local split = os.clock() - state.startTime
+	state.nextCheckpoint += 1
+	state.splits[index] = split
+	state.respawnCFrame = Maps.checkpointCFrame(map.checkpoints[index])
+
+	local data = PlayerData.get(player)
+	local mapData = data and data.maps[map.id]
+	local bestSplit = mapData and mapData.splits and mapData.splits[index]
+	local delta = if typeof(bestSplit) == "number" then split - bestSplit else nil
+	Remotes.CheckpointReached:FireClient(player, index, #map.checkpoints, split, delta)
+end
+
+local function finishRace(player: Player, map: Maps.MapInfo)
+	local state = states[player]
+	if not state or state.mapId ~= map.id or not state.racing then
+		return
+	end
+	if state.nextCheckpoint <= #map.checkpoints then
 		return -- se ha saltado algún checkpoint
 	end
 
 	local elapsed = os.clock() - state.startTime
-	resetState(player, state)
+	local splits = table.clone(state.splits)
+	stopRace(player, state)
+	state.respawnCFrame = Maps.startLine(map)
 
 	if elapsed < Config.MinValidTime then
-		RaceCancelled:FireClient(player, "Tiempo no válido")
+		Remotes.RaceCancelled:FireClient(player, "Tiempo no válido")
 		return
 	end
 
-	local isRecord = state.best == nil or elapsed < state.best
-	if isRecord then
-		setBest(player, state, elapsed)
-		Leaderboard.submit(player, elapsed)
-	end
-	RaceFinished:FireClient(player, elapsed, state.best, isRecord)
+	local data = PlayerData.get(player)
+	local mapData = data and data.maps[map.id] or {}
+	local previousBest = mapData.best
+	local isRecord = previousBest == nil or elapsed < previousBest
+	local oldMedal = mapData.medal or 0
+	local medal = if map.tutorial then 0 else Config.MedalRank(elapsed, map.medals)
 
-	-- Vuelve a la salida tras unos segundos para otro intento
-	task.delay(3, function()
-		if states[player] == state and not state.racing then
-			teleport(player, spawnCFrame())
+	if data then
+		mapData.runs = (mapData.runs or 0) + 1
+		if isRecord then
+			mapData.best = elapsed
+			mapData.splits = splits
 		end
-	end)
+		mapData.medal = math.max(oldMedal, medal)
+		data.maps[map.id] = mapData
+	end
+
+	local result: Result = {
+		mapId = map.id,
+		time = elapsed,
+		best = if isRecord then elapsed else previousBest,
+		previousBest = previousBest,
+		isRecord = isRecord,
+		medal = medal,
+		newMedal = medal > oldMedal,
+		splits = splits,
+		mode = state.mode,
+		rewards = {},
+	}
+
+	if isRecord and not map.tutorial then
+		Leaderboard.submit(player, map.id, elapsed)
+	end
+	for _, handler in finishHandlers do
+		handler(player, map, result)
+	end
+	if data then
+		PlayerData.sync(player)
+	end
+	Remotes.RaceFinished:FireClient(player, result)
+
+	-- En solitario, vuelve a la salida para otro intento
+	if state.mode == "solo" then
+		task.delay(3, function()
+			if states[player] == state and state.mapId == map.id and not state.racing and not state.countdownToken then
+				RaceService.teleport(player, Maps.onTop(map.startPad))
+			end
+		end)
+	end
 end
 
--- Detectores
-startGate.Touched:Connect(function(hit)
-	local player = playerFromHit(hit)
-	if player then
-		beginCountdown(player)
-	end
-end)
-
-finishGate.Touched:Connect(function(hit)
-	local player = playerFromHit(hit)
-	if player then
-		finishRace(player)
-	end
-end)
-
-for index, cp in checkpoints do
-	cp.Touched:Connect(function(hit)
-		local player = playerFromHit(hit)
-		if player then
-			reachCheckpoint(player, index)
-		end
-	end)
-end
-
-local killParts = course:FindFirstChild("KillParts")
-if killParts then
-	for _, part in killParts:GetDescendants() do
-		if part:IsA("BasePart") then
-			part.Touched:Connect(function(hit)
-				local player = playerFromHit(hit)
-				if player and states[player] then
-					teleport(player, states[player].respawnCFrame)
-				end
-			end)
-		end
-	end
-end
-
--- Reiniciar (tecla R)
-RequestRestart.OnServerEvent:Connect(function(player)
+local function restart(player: Player)
 	local state = states[player]
 	if not state then
 		return
@@ -781,92 +1748,160 @@ RequestRestart.OnServerEvent:Connect(function(player)
 		return
 	end
 	state.lastRestart = now
-	resetState(player, state)
-	RaceCancelled:FireClient(player, nil)
-	teleport(player, spawnCFrame())
-end)
 
--- Jugadores
+	if not state.mapId then
+		RaceService.teleport(player, Maps.lobbySpawn())
+	elseif state.mode == "live" then
+		RaceService.teleport(player, state.respawnCFrame) -- en carrera en vivo no se reinicia el tiempo
+	else
+		RaceService.beginCountdown(player)
+	end
+end
+
+-- Inicio ---------------------------------------------------------------------------------
+
 local function onPlayerAdded(player: Player)
 	local state: State = {
+		mapId = nil,
+		mode = "solo",
 		racing = false,
+		countdownToken = nil,
 		startTime = 0,
 		nextCheckpoint = 1,
-		respawnCFrame = spawnCFrame(),
-		best = nil,
+		splits = {},
+		respawnCFrame = Maps.lobbySpawn(),
 		lastStart = 0,
 		lastRestart = 0,
+		lastEnter = 0,
 	}
 	states[player] = state
 
-	local leaderstats = Instance.new("Folder")
-	leaderstats.Name = "leaderstats"
-	local bestValue = Instance.new("StringValue")
-	bestValue.Name = "Mejor"
-	bestValue.Value = "--"
-	bestValue.Parent = leaderstats
-	leaderstats.Parent = player
-
-	-- Si muere en mitad de la carrera, reaparece en su último checkpoint
+	-- Si muere, reaparece en su último checkpoint (o en la salida si estaba en la cuenta atrás)
 	player.CharacterAdded:Connect(function(character)
+		if not state.mapId then
+			return
+		end
+		character:WaitForChild("HumanoidRootPart")
+		task.wait()
 		if state.countdownToken then
-			resetState(player, state)
-			RaceCancelled:FireClient(player, nil)
-		elseif state.racing then
-			character:WaitForChild("HumanoidRootPart")
-			task.wait()
-			teleport(player, state.respawnCFrame)
-		end
-	end)
-
-	task.spawn(function()
-		local saved = Leaderboard.loadBest(player.UserId)
-		if saved and states[player] == state and (state.best == nil or saved < state.best) then
-			setBest(player, state, saved)
+			stopRace(player, state)
+			Remotes.RaceCancelled:FireClient(player, nil)
+			RaceService.teleport(player, Maps.onTop((currentMap(state) :: Maps.MapInfo).startPad))
+		else
+			RaceService.teleport(player, state.respawnCFrame)
 		end
 	end)
 end
 
-Players.PlayerAdded:Connect(onPlayerAdded)
-for _, player in Players:GetPlayers() do
-	onPlayerAdded(player)
-end
+function RaceService.init()
+	for _, map in Maps.list() do
+		map.startGate.Touched:Connect(function(hit)
+			local player = playerFromHit(hit)
+			local state = player and states[player]
+			if
+				player
+				and state
+				and state.mapId == map.id
+				and state.mode == "solo"
+				and not state.racing
+				and not state.countdownToken
+			then
+				RaceService.beginCountdown(player)
+			end
+		end)
 
-Players.PlayerRemoving:Connect(function(player)
-	states[player] = nil
-end)
+		map.finish.Touched:Connect(function(hit)
+			local player = playerFromHit(hit)
+			if player then
+				finishRace(player, map)
+			end
+		end)
 
--- Caídas al vacío
-task.spawn(function()
-	while true do
-		for player, state in states do
-			local character = player.Character
-			local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
-			if root and root.Position.Y < Config.FallY then
-				teleport(player, state.respawnCFrame)
+		for index, cp in map.checkpoints do
+			cp.Touched:Connect(function(hit)
+				local player = playerFromHit(hit)
+				if player then
+					reachCheckpoint(player, map, index)
+				end
+			end)
+		end
+	end
+
+	-- Portales del lobby
+	local portals = Maps.lobby():FindFirstChild("Portals")
+	if portals then
+		for _, portal in portals:GetChildren() do
+			local mapId = portal:GetAttribute("MapId")
+			if portal:IsA("BasePart") and typeof(mapId) == "string" then
+				portal.Touched:Connect(function(hit)
+					local player = playerFromHit(hit)
+					if player and states[player] and states[player].mapId == nil then
+						local ok, message = RaceService.enterMap(player, mapId, "solo")
+						if not ok and message then
+							Remotes.Notify:FireClient(player, message)
+						end
+					end
+				end)
 			end
 		end
-		task.wait(0.1)
 	end
-end)
+
+	Remotes.RequestRestart.OnServerEvent:Connect(restart)
+	Remotes.ReturnToLobby.OnServerEvent:Connect(RaceService.returnToLobby)
+	Remotes.RequestMap.OnServerInvoke = function(player, mapId)
+		if typeof(mapId) ~= "string" then
+			return false, "Mapa no válido"
+		end
+		return RaceService.enterMap(player, mapId, "solo")
+	end
+
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	for _, player in Players:GetPlayers() do
+		onPlayerAdded(player)
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		if states[player] and states[player].mapId then
+			for _, handler in leaveHandlers do
+				handler(player)
+			end
+		end
+		states[player] = nil
+	end)
+
+	-- Caídas al vacío
+	task.spawn(function()
+		while true do
+			for player, state in states do
+				local character = player.Character
+				local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+				if root and not root.Anchored and root.Position.Y < Config.FallY then
+					RaceService.teleport(player, state.respawnCFrame)
+				end
+			end
+			task.wait(0.1)
+		end
+	end)
+end
+
+return RaceService
 ]]></string>
         </Properties>
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="9">
+  <Item class="StarterPlayer" referent="13">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterCharacterScripts" referent="10">
+    <Item class="StarterCharacterScripts" referent="14">
       <Properties>
         <string name="Name">StarterCharacterScripts</string>
       </Properties>
-      <Item class="Folder" referent="11">
+      <Item class="Folder" referent="15">
         <Properties>
           <string name="Name">Character</string>
         </Properties>
-        <Item class="LocalScript" referent="12">
+        <Item class="LocalScript" referent="16">
           <Properties>
             <string name="Name">Effects</string>
             <string name="Source"><![CDATA[-- Efectos visuales y de sonido del movimiento: poses, rastro, partículas,
@@ -1058,7 +2093,7 @@ character.Destroying:Connect(cleanup)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="13">
+        <Item class="LocalScript" referent="17">
           <Properties>
             <string name="Name">Movement</string>
             <string name="Source"><![CDATA[-- Movimiento de parkour: momentum al correr, deslizamiento, wall run y wall jump.
@@ -1258,6 +2293,13 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 	end
 	humanoid.JumpPower = Config.JumpPower
 
+	-- En la tirolina manda el script de obstáculos
+	if character:GetAttribute("Riding") then
+		stopWallRun()
+		setParkourState("None")
+		return
+	end
+
 	local now = os.clock()
 	local moving = humanoid.MoveDirection.Magnitude > 0.1
 
@@ -1336,18 +2378,83 @@ humanoid.Died:Connect(cleanup)
         </Item>
       </Item>
     </Item>
-    <Item class="StarterPlayerScripts" referent="14">
+    <Item class="StarterPlayerScripts" referent="18">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="15">
+      <Item class="Folder" referent="19">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="16">
+        <Item class="ModuleScript" referent="20">
           <Properties>
-            <string name="Name">RaceHUD</string>
-            <string name="Source"><![CDATA[-- Interfaz de la carrera: cronómetro, checkpoints, mejor tiempo y mensajes.
+            <string name="Name">ClientState</string>
+            <string name="Source"><![CDATA[-- Datos del jugador en el cliente (los envía el servidor con DataSync).
+-- También lo usan los scripts del personaje para leer los ajustes.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local ClientState = {
+	data = nil :: { [string]: any }?,
+}
+
+local changed = Instance.new("BindableEvent")
+ClientState.Changed = changed.Event
+
+Remotes.DataSync.OnClientEvent:Connect(function(snapshot)
+	ClientState.data = snapshot
+	changed:Fire()
+end)
+Remotes.DataSync:FireServer() -- pide los datos por si ya se enviaron antes de cargar
+
+function ClientState.mapData(mapId: string): { [string]: any }?
+	local data = ClientState.data
+	return data and data.maps[mapId]
+end
+
+-- Ajustes del jugador (con valor por defecto si aún no han llegado los datos)
+function ClientState.setting(key: string): boolean
+	local data = ClientState.data
+	local value = data and data.settings and data.settings[key]
+	if value == nil then
+		return Config.DefaultSettings[key] ~= false
+	end
+	return value == true
+end
+
+-- Carpeta de un mapa en Workspace (con sus atributos: nombre, medallas...)
+function ClientState.mapFolder(mapId: string): Folder?
+	local maps = workspace:FindFirstChild("Maps")
+	return maps and maps:FindFirstChild(mapId) :: Folder?
+end
+
+function ClientState.mapsSorted(): { Folder }
+	local maps = workspace:WaitForChild("Maps")
+	local list = {}
+	for _, folder in maps:GetChildren() do
+		if folder:IsA("Folder") then
+			table.insert(list, folder)
+		end
+	end
+	table.sort(list, function(a, b)
+		return (a:GetAttribute("Order") or 0) < (b:GetAttribute("Order") or 0)
+	end)
+	return list
+end
+
+return ClientState
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="21">
+          <Properties>
+            <string name="Name">HUD</string>
+            <string name="Source"><![CDATA[-- Interfaz de la carrera: cronómetro, parciales, medallas, cuenta atrás,
+-- mensajes y botones laterales (Mapas, Lobby...).
 
 local ContextActionService = game:GetService("ContextActionService")
 local Debris = game:GetService("Debris")
@@ -1355,130 +2462,107 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 local Sfx = require(Shared:WaitForChild("Sfx"))
 
+local ClientState = require(script.Parent:WaitForChild("ClientState"))
+local UI = require(script.Parent:WaitForChild("UI"))
+
 local player = Players.LocalPlayer
-local remotes = ReplicatedStorage:WaitForChild("Remotes")
 
--- Construcción de la UI -------------------------------------------------------
+local HUD = {}
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "RaceHUD"
-gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true
-gui.Parent = player:WaitForChild("PlayerGui")
+local gui: ScreenGui
+local racePanel: Frame
+local timerLabel: TextLabel
+local checkpointLabel: TextLabel
+local deltaLabel: TextLabel
+local mapLabel: TextLabel
+local popupLabel: TextLabel
+local subPopupLabel: TextLabel
+local countdownLabel: TextLabel
+local countdownScale: UIScale
+local controlsLabel: TextLabel
+local sideBar: Frame
 
-local function label(props: { [string]: any }): TextLabel
-	local text = Instance.new("TextLabel")
-	text.BackgroundTransparency = 1
-	text.Font = Enum.Font.GothamBlack
-	text.TextColor3 = Color3.new(1, 1, 1)
-	text.TextStrokeTransparency = 0.5
-	text.TextScaled = true
-	for key, value in props do
-		(text :: any)[key] = value
-	end
-	text.Parent = gui
-	return text
-end
-
-local timerLabel = label({
-	Name = "Timer",
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 50),
-	Size = UDim2.new(0, 320, 0, 60),
-	Text = Config.FormatTime(0),
-})
-
-local checkpointLabel = label({
-	Name = "Checkpoint",
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 112),
-	Size = UDim2.new(0, 320, 0, 26),
-	Font = Enum.Font.GothamBold,
-	Text = "Cruza la salida azul para empezar",
-})
-
-local bestLabel = label({
-	Name = "Best",
-	AnchorPoint = Vector2.new(0.5, 0),
-	Position = UDim2.new(0.5, 0, 0, 140),
-	Size = UDim2.new(0, 320, 0, 22),
-	Font = Enum.Font.GothamBold,
-	TextColor3 = Color3.fromRGB(255, 210, 0),
-	Text = "Mejor: " .. Config.FormatTime(nil),
-})
-
-local popupLabel = label({
-	Name = "Popup",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.35),
-	Size = UDim2.new(0, 600, 0, 70),
-	TextTransparency = 1,
-	TextStrokeTransparency = 1,
-})
-
-local countdownLabel = label({
-	Name = "Countdown",
-	AnchorPoint = Vector2.new(0.5, 0.5),
-	Position = UDim2.fromScale(0.5, 0.45),
-	Size = UDim2.new(0, 260, 0, 160),
-	Text = "",
-	Visible = false,
-})
-local countdownScale = Instance.new("UIScale")
-countdownScale.Parent = countdownLabel
-
-label({
-	Name = "Controls",
-	AnchorPoint = Vector2.new(0, 1),
-	Position = UDim2.new(0, 16, 1, -16),
-	Size = UDim2.new(0, 380, 0, 70),
-	Font = Enum.Font.Gotham,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTransparency = 0.2,
-	Text = "Corre para ganar velocidad\nC / Ctrl: deslizar   ·   Salta hacia una pared: wall run\nEspacio en la pared: wall jump   ·   R: reiniciar",
-})
-
--- Mensajes emergentes ---------------------------------------------------------
-
-local popupTween: Tween? = nil
-local function showPopup(text: string, color: Color3?)
-	if popupTween then
-		popupTween:Cancel()
-	end
-	popupLabel.Text = text
-	popupLabel.TextColor3 = color or Color3.new(1, 1, 1)
-	popupLabel.TextTransparency = 0
-	popupLabel.TextStrokeTransparency = 0.4
-	popupTween = TweenService:Create(
-		popupLabel,
-		TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, false, 1.6),
-		{ TextTransparency = 1, TextStrokeTransparency = 1 }
-	)
-	popupTween:Play()
-end
-
--- Cuenta atrás -------------------------------------------------------------------
-
+local running = false
+local startTime = 0
 local countdownToken: {}? = nil
 
-local function bumpCountdown(text: string, color: Color3)
-	countdownLabel.Visible = true
-	countdownLabel.Text = text
-	countdownLabel.TextColor3 = color
-	countdownLabel.TextTransparency = 0
-	countdownLabel.TextStrokeTransparency = 0.3
-	countdownScale.Scale = 1.6
-	TweenService:Create(countdownScale, TweenInfo.new(0.35, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+-- Mensajes emergentes ----------------------------------------------------------------
+
+local popupTweens: { Tween } = {}
+
+function HUD.popup(text: string, color: Color3?, subtext: string?)
+	for _, tween in popupTweens do
+		tween:Cancel()
+	end
+	table.clear(popupTweens)
+
+	popupLabel.Text = text
+	popupLabel.TextColor3 = color or UI.Colors.Text
+	subPopupLabel.Text = subtext or ""
+	for _, label in { popupLabel, subPopupLabel } do
+		label.TextTransparency = 0
+		label.TextStrokeTransparency = 0.4
+		local tween = TweenService:Create(
+			label,
+			TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In, 0, false, 2),
+			{ TextTransparency = 1, TextStrokeTransparency = 1 }
+		)
+		tween:Play()
+		table.insert(popupTweens, tween)
+	end
 end
 
-local function hideCountdown()
-	countdownToken = nil
-	countdownLabel.Visible = false
+-- Botones laterales (otros módulos añaden los suyos) -----------------------------------
+
+function HUD.addSideButton(text: string, order: number, color: Color3?, callback: () -> ()): TextButton
+	local button = UI.button(sideBar, text, color or UI.Colors.Card, {
+		Size = UDim2.fromOffset(170, 48),
+		LayoutOrder = order,
+	})
+	button.Activated:Connect(callback)
+	return button
+end
+
+-- Información del mapa actual ----------------------------------------------------------
+
+local function nextMedalText(mapId: string): string
+	local folder = ClientState.mapFolder(mapId)
+	if not folder or folder:GetAttribute("Tutorial") then
+		return ""
+	end
+	local mapData = ClientState.mapData(mapId)
+	local current = mapData and mapData.medal or 0
+	if current >= #Config.Medals then
+		return "  ·  ¡Todas las medallas!"
+	end
+	local nextMedal = Config.MedalInfo(current + 1)
+	local seconds = folder:GetAttribute(nextMedal.id)
+	return string.format("  ·  %s: %s", nextMedal.name, Config.FormatTime(seconds))
+end
+
+local function updateMapInfo()
+	local mapId = player:GetAttribute("MapId")
+	if typeof(mapId) ~= "string" then
+		racePanel.Visible = false
+		return
+	end
+	racePanel.Visible = true
+	local folder = ClientState.mapFolder(mapId)
+	local mapData = ClientState.mapData(mapId)
+	local name = folder and folder:GetAttribute("DisplayName") or mapId
+	mapLabel.Text = string.format(
+		"%s  ·  Mejor: %s%s",
+		name,
+		Config.FormatTime(mapData and mapData.best),
+		nextMedalText(mapId)
+	)
 end
 
 -- Confeti al batir un récord
@@ -1488,128 +2572,966 @@ local function confetti()
 	if not root then
 		return
 	end
-	local emitter = Instance.new("ParticleEmitter")
-	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	emitter.Color = ColorSequence.new({
-		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 80, 80)),
-		ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 210, 0)),
-		ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 255, 140)),
-		ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 170, 255)),
-	})
-	emitter.EmissionDirection = Enum.NormalId.Top
-	emitter.Speed = NumberRange.new(20, 35)
-	emitter.SpreadAngle = Vector2.new(60, 60)
-	emitter.Lifetime = NumberRange.new(1, 2)
-	emitter.Acceleration = Vector3.new(0, -30, 0)
-	emitter.Size = NumberSequence.new(0.6, 0.2)
-	emitter.LightEmission = 0.5
-	emitter.Rate = 0
-	emitter.Parent = root
+	local emitter = UI.new("ParticleEmitter", {
+		Texture = "rbxasset://textures/particles/sparkles_main.dds",
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 80, 80)),
+			ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 210, 0)),
+			ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 255, 140)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 170, 255)),
+		}),
+		EmissionDirection = Enum.NormalId.Top,
+		Speed = NumberRange.new(20, 35),
+		SpreadAngle = Vector2.new(60, 60),
+		Lifetime = NumberRange.new(1, 2),
+		Acceleration = Vector3.new(0, -30, 0),
+		Size = NumberSequence.new(0.6, 0.2),
+		LightEmission = 0.5,
+		Rate = 0,
+	}, root)
 	emitter:Emit(80)
 	Debris:AddItem(emitter, 3)
 end
 
--- Estado de la carrera ----------------------------------------------------------
+-- Cuenta atrás -------------------------------------------------------------------------
 
-local running = false
-local startTime = 0
-
-local function updateBest()
-	bestLabel.Text = "Mejor: " .. Config.FormatTime(player:GetAttribute("BestTime"))
+local function bumpCountdown(text: string, color: Color3)
+	countdownLabel.Visible = true
+	countdownLabel.Text = text
+	countdownLabel.TextColor3 = color
+	countdownScale.Scale = 1.6
+	TweenService:Create(countdownScale, TweenInfo.new(0.35, Enum.EasingStyle.Back), { Scale = 1 }):Play()
 end
-updateBest()
-player:GetAttributeChangedSignal("BestTime"):Connect(updateBest)
 
-RunService.RenderStepped:Connect(function()
-	if running then
-		timerLabel.Text = Config.FormatTime(os.clock() - startTime)
-	end
-end)
+local function hideCountdown()
+	countdownToken = nil
+	countdownLabel.Visible = false
+end
 
-remotes:WaitForChild("RaceCountdown").OnClientEvent:Connect(function(seconds: number)
+local function resetTimer(text: string)
 	running = false
 	timerLabel.Text = Config.FormatTime(0)
-	timerLabel.TextColor3 = Color3.new(1, 1, 1)
-	checkpointLabel.Text = "¡Prepárate!"
+	timerLabel.TextColor3 = UI.Colors.Text
+	checkpointLabel.Text = text
+	deltaLabel.Text = ""
+end
 
-	local token = {}
-	countdownToken = token
-	for i = seconds, 1, -1 do
-		if countdownToken ~= token then
-			return
-		end
-		bumpCountdown(tostring(i), Color3.new(1, 1, 1))
-		Sfx.play("Countdown", 0.8)
-		task.wait(1)
+local function formatDelta(delta: number): (string, Color3)
+	if delta <= 0 then
+		return string.format("-%.3f", -delta), UI.Colors.Good
 	end
-end)
+	return string.format("+%.3f", delta), UI.Colors.Bad
+end
 
-remotes:WaitForChild("RaceStarted").OnClientEvent:Connect(function(total: number)
-	-- "¡YA!" llega del servidor, así el tiempo empieza a la vez en los dos lados
-	local token = {}
-	countdownToken = token
-	bumpCountdown("¡YA!", Color3.fromRGB(0, 255, 140))
-	Sfx.play("Go", 1.4, 0.8)
-	task.delay(0.8, function()
-		if countdownToken == token then
-			hideCountdown()
+-- Construcción -------------------------------------------------------------------------
+
+local function build()
+	gui = UI.new("ScreenGui", {
+		Name = "HUD",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	}, player:WaitForChild("PlayerGui"))
+	HUD.gui = gui
+
+	racePanel = UI.new("Frame", {
+		Name = "Race",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 44),
+		Size = UDim2.fromOffset(520, 150),
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, gui)
+	UI.autoScale(racePanel, 0.7)
+
+	timerLabel = UI.label(racePanel, {
+		Size = UDim2.new(1, 0, 0, 60),
+		Font = Enum.Font.GothamBlack,
+		TextStrokeTransparency = 0.5,
+		Text = Config.FormatTime(0),
+	})
+	deltaLabel = UI.label(racePanel, {
+		Position = UDim2.fromOffset(0, 60),
+		Size = UDim2.new(1, 0, 0, 26),
+		TextStrokeTransparency = 0.5,
+		Text = "",
+	})
+	checkpointLabel = UI.label(racePanel, {
+		Position = UDim2.fromOffset(0, 88),
+		Size = UDim2.new(1, 0, 0, 26),
+		TextStrokeTransparency = 0.5,
+		Text = "",
+	})
+	mapLabel = UI.label(racePanel, {
+		Position = UDim2.fromOffset(0, 118),
+		Size = UDim2.new(1, 0, 0, 22),
+		TextColor3 = UI.Colors.Gold,
+		TextStrokeTransparency = 0.5,
+		Text = "",
+	})
+
+	popupLabel = UI.label(gui, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.33),
+		Size = UDim2.new(0.8, 0, 0, 64),
+		Font = Enum.Font.GothamBlack,
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+		Text = "",
+	})
+	UI.new("UITextSizeConstraint", { MaxTextSize = 56 }, popupLabel)
+	subPopupLabel = UI.label(gui, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.33, 50),
+		Size = UDim2.new(0.8, 0, 0, 30),
+		TextColor3 = UI.Colors.Gold,
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+		Text = "",
+	})
+	UI.new("UITextSizeConstraint", { MaxTextSize = 28 }, subPopupLabel)
+
+	countdownLabel = UI.label(gui, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.45),
+		Size = UDim2.fromOffset(260, 160),
+		Font = Enum.Font.GothamBlack,
+		TextStrokeTransparency = 0.3,
+		Visible = false,
+		Text = "",
+	})
+	countdownScale = UI.new("UIScale", nil, countdownLabel)
+
+	local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	controlsLabel = UI.label(gui, {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 16, 1, -16),
+		Size = UDim2.fromOffset(420, 70),
+		Font = Enum.Font.Gotham,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTransparency = 0.2,
+		TextStrokeTransparency = 0.6,
+		Text = if isTouch
+			then "Botón Deslizar: más velocidad\nSalta hacia una pared: wall run\nSalta en la pared: wall jump"
+			else "Corre para ganar velocidad  ·  C / Ctrl: deslizar\nSalta hacia una pared: wall run  ·  Espacio en la pared: wall jump\nR: reiniciar",
+		Visible = not isTouch,
+	})
+	UI.new("UITextSizeConstraint", { MaxTextSize = 18 }, controlsLabel)
+
+	sideBar = UI.new("Frame", {
+		Name = "SideBar",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.45, 0),
+		Size = UDim2.fromOffset(170, 300),
+		BackgroundTransparency = 1,
+	}, gui)
+	UI.new("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 8),
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+	}, sideBar)
+	UI.autoScale(sideBar, 0.6)
+end
+
+function HUD.setControlsVisible(visible: boolean)
+	local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	controlsLabel.Visible = visible and not isTouch
+end
+
+function HUD.start()
+	build()
+
+	RunService.RenderStepped:Connect(function()
+		if running then
+			timerLabel.Text = Config.FormatTime(os.clock() - startTime)
 		end
 	end)
 
-	running = true
-	startTime = os.clock()
-	timerLabel.TextColor3 = Color3.new(1, 1, 1)
-	checkpointLabel.Text = string.format("Checkpoint 0/%d", total)
-end)
+	player:GetAttributeChangedSignal("MapId"):Connect(updateMapInfo)
+	ClientState.Changed:Connect(updateMapInfo)
+	updateMapInfo()
 
-remotes:WaitForChild("CheckpointReached").OnClientEvent:Connect(function(index: number, total: number, split: number)
-	checkpointLabel.Text = string.format("Checkpoint %d/%d", index, total)
-	showPopup(string.format("Checkpoint %d  ·  %s", index, Config.FormatTime(split)), Color3.fromRGB(0, 255, 140))
-	Sfx.play("Checkpoint", 1.2)
-end)
+	HUD.addSideButton("🏠 Lobby", 90, nil, function()
+		Remotes.ReturnToLobby:FireServer()
+	end)
 
-remotes:WaitForChild("RaceFinished").OnClientEvent:Connect(function(time: number, best: number, isRecord: boolean)
-	running = false
-	timerLabel.Text = Config.FormatTime(time) -- tiempo oficial del servidor
-	checkpointLabel.Text = "¡Meta!"
-	if isRecord then
-		timerLabel.TextColor3 = Color3.fromRGB(255, 210, 0)
-		showPopup("¡NUEVO RÉCORD!  " .. Config.FormatTime(time), Color3.fromRGB(255, 210, 0))
-		Sfx.play("Record", 1, 0.8)
-		confetti()
+	Remotes.RaceCountdown.OnClientEvent:Connect(function(_mapId: string, seconds: number)
+		resetTimer("¡Prepárate!")
+		local token = {}
+		countdownToken = token
+		for i = seconds, 1, -1 do
+			if countdownToken ~= token then
+				return
+			end
+			bumpCountdown(tostring(i), UI.Colors.Text)
+			Sfx.play("Countdown", 0.8)
+			task.wait(1)
+		end
+	end)
+
+	Remotes.RaceStarted.OnClientEvent:Connect(function(_mapId: string, total: number)
+		-- "¡YA!" llega del servidor, así el tiempo empieza a la vez en los dos lados
+		local token = {}
+		countdownToken = token
+		bumpCountdown("¡YA!", UI.Colors.Good)
+		Sfx.play("Go", 1.4, 0.8)
+		task.delay(0.8, function()
+			if countdownToken == token then
+				hideCountdown()
+			end
+		end)
+		running = true
+		startTime = os.clock()
+		checkpointLabel.Text = string.format("Checkpoint 0/%d", total)
+		deltaLabel.Text = ""
+	end)
+
+	Remotes.CheckpointReached.OnClientEvent:Connect(function(index: number, total: number, split: number, delta: number?)
+		checkpointLabel.Text = string.format("Checkpoint %d/%d", index, total)
+		local subtext = nil
+		if delta then
+			local text, color = formatDelta(delta)
+			deltaLabel.Text = text
+			deltaLabel.TextColor3 = color
+			subtext = text .. " respecto a tu récord"
+		end
+		HUD.popup(string.format("Checkpoint %d  ·  %s", index, Config.FormatTime(split)), UI.Colors.Good, subtext)
+		Sfx.play("Checkpoint", 1.2)
+	end)
+
+	Remotes.RaceFinished.OnClientEvent:Connect(function(result)
+		running = false
+		timerLabel.Text = Config.FormatTime(result.time) -- tiempo oficial del servidor
+		checkpointLabel.Text = "¡Meta!"
+
+		local parts = {}
+		if result.newMedal then
+			local medal = Config.MedalInfo(result.medal)
+			table.insert(parts, "¡Medalla de " .. medal.name .. "!")
+		end
+		if result.rewards.coins and result.rewards.coins > 0 then
+			table.insert(parts, string.format("+%d monedas", result.rewards.coins))
+		end
+		if result.rewards.xp and result.rewards.xp > 0 then
+			table.insert(parts, string.format("+%d XP", result.rewards.xp))
+		end
+		local subtext = table.concat(parts, "   ")
+
+		if result.isRecord then
+			timerLabel.TextColor3 = UI.Colors.Gold
+			HUD.popup("¡NUEVO RÉCORD!  " .. Config.FormatTime(result.time), UI.Colors.Gold, subtext)
+			Sfx.play("Record", 1, 0.8)
+			confetti()
+		else
+			local text, color = formatDelta(result.time - result.best)
+			deltaLabel.Text = text
+			deltaLabel.TextColor3 = color
+			HUD.popup(string.format("%s  (%s)", Config.FormatTime(result.time), text), UI.Colors.Bad, subtext)
+			Sfx.play("Finish", 1, 0.5)
+		end
+		if result.newMedal then
+			Sfx.play("Medal", 1.6, 0.7)
+		end
+	end)
+
+	Remotes.RaceCancelled.OnClientEvent:Connect(function(reason: string?)
+		hideCountdown()
+		resetTimer("Cruza la salida azul para empezar")
+		if reason then
+			HUD.popup(reason, UI.Colors.Bad)
+		end
+	end)
+
+	Remotes.Notify.OnClientEvent:Connect(function(text: string, color: Color3?)
+		HUD.popup(text, color or UI.Colors.Text)
+	end)
+
+	-- Reiniciar
+	ContextActionService:BindAction("ParkourRestart", function(_, inputState)
+		if inputState == Enum.UserInputState.Begin then
+			Remotes.RequestRestart:FireServer()
+		end
+		return Enum.ContextActionResult.Sink
+	end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonY)
+	ContextActionService:SetTitle("ParkourRestart", "Reiniciar")
+	ContextActionService:SetPosition("ParkourRestart", UDim2.new(1, -200, 1, -210))
+end
+
+return HUD
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="22">
+          <Properties>
+            <string name="Name">Main</string>
+            <string name="Source"><![CDATA[-- Arranque del cliente: pone en marcha la interfaz y los sistemas locales.
+
+local Client = script.Parent
+
+local HUD = require(Client:WaitForChild("HUD"))
+local MapMenu = require(Client:WaitForChild("MapMenu"))
+local Obstacles = require(Client:WaitForChild("Obstacles"))
+
+HUD.start()
+MapMenu.start()
+Obstacles.start()
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="23">
+          <Properties>
+            <string name="Name">MapMenu</string>
+            <string name="Source"><![CDATA[-- Selector de mapas: tu mejor tiempo, medallas conseguidas y tiempos objetivo.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local ClientState = require(script.Parent:WaitForChild("ClientState"))
+local HUD = require(script.Parent:WaitForChild("HUD"))
+local UI = require(script.Parent:WaitForChild("UI"))
+
+local MapMenu = {}
+
+local PANEL = "Maps"
+
+local list: ScrollingFrame
+local header: Frame
+
+local function medalRow(parent: Instance, folder: Folder, earned: number)
+	local row = UI.new("Frame", {
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(16, 82),
+		Size = UDim2.new(1, -170, 0, 24),
+	}, parent)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 10),
+	}, row)
+	for rank = 1, #Config.Medals do
+		local medal = Config.MedalInfo(rank)
+		local seconds = folder:GetAttribute(medal.id)
+		if seconds then
+			UI.label(row, {
+				Size = UDim2.fromOffset(110, 24),
+				LayoutOrder = rank,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextColor3 = medal.color,
+				TextTransparency = if earned >= rank then 0 else 0.55,
+				Text = (if earned >= rank then "● " else "○ ") .. string.format("%.1fs", seconds),
+			})
+		end
+	end
+end
+
+local function play(mapId: string)
+	local ok, message = Remotes.RequestMap:InvokeServer(mapId)
+	if ok then
+		UI.close(PANEL)
+	elseif message then
+		HUD.popup(message, UI.Colors.Bad)
+	end
+end
+
+-- Otros módulos pueden personalizar las tarjetas (por ejemplo, bloquear mapas VIP)
+local cardDecorators: { (Frame, Folder, TextButton) -> () } = {}
+
+function MapMenu.decorateCards(decorator: (Frame, Folder, TextButton) -> ())
+	table.insert(cardDecorators, decorator)
+end
+
+-- Fila superior para botones extra (tutorial, carrera en vivo...)
+function MapMenu.addHeaderButton(text: string, order: number, color: Color3, callback: () -> ()): TextButton
+	local button = UI.button(header, text, color, {
+		Size = UDim2.fromOffset(250, 44),
+		LayoutOrder = order,
+	})
+	button.Activated:Connect(callback)
+	return button
+end
+
+function MapMenu.refresh()
+	for _, child in list:GetChildren() do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+
+	for i, folder in ClientState.mapsSorted() do
+		if folder:GetAttribute("Tutorial") then
+			continue
+		end
+		local color = folder:GetAttribute("Color") or UI.Colors.Accent
+		local mapData = ClientState.mapData(folder.Name)
+		local earned = mapData and mapData.medal or 0
+
+		local card = UI.new("Frame", {
+			Name = folder.Name,
+			Size = UDim2.new(1, -12, 0, 118),
+			BackgroundColor3 = UI.Colors.Card,
+			LayoutOrder = i,
+		}, list)
+		UI.corner(card, 12)
+		UI.new("Frame", {
+			Size = UDim2.new(0, 8, 1, 0),
+			BackgroundColor3 = color,
+			BorderSizePixel = 0,
+		}, card)
+
+		UI.label(card, {
+			Position = UDim2.fromOffset(16, 10),
+			Size = UDim2.new(1, -180, 0, 36),
+			Font = Enum.Font.GothamBlack,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = folder:GetAttribute("DisplayName") or folder.Name,
+		})
+		UI.label(card, {
+			Name = "Best",
+			Position = UDim2.fromOffset(16, 50),
+			Size = UDim2.new(1, -180, 0, 26),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextColor3 = UI.Colors.Muted,
+			Text = string.format(
+				"Mejor: %s   ·   Medalla: %s",
+				Config.FormatTime(mapData and mapData.best),
+				if earned > 0 then Config.MedalInfo(earned).name else "ninguna"
+			),
+		})
+		medalRow(card, folder, earned)
+
+		local playButton = UI.button(card, "JUGAR", UI.Colors.Good, {
+			Name = "Play",
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -14, 0.5, 0),
+			Size = UDim2.fromOffset(140, 56),
+		})
+		playButton.Activated:Connect(function()
+			play(folder.Name)
+		end)
+
+		for _, decorate in cardDecorators do
+			decorate(card, folder, playButton)
+		end
+	end
+end
+
+function MapMenu.start()
+	local frame, content = UI.panel(HUD.gui, PANEL, "🗺  Mapas", UDim2.fromOffset(720, 560))
+
+	header = UI.new("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 44),
+	}, content)
+	UI.new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 10),
+	}, header)
+
+	list = UI.new("ScrollingFrame", {
+		Position = UDim2.fromOffset(0, 54),
+		Size = UDim2.new(1, 0, 1, -54),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		ScrollBarThickness = 6,
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	}, content)
+	UI.new("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 10),
+	}, list)
+
+	UI.onOpen(PANEL, MapMenu.refresh)
+	ClientState.Changed:Connect(function()
+		if frame.Visible then
+			MapMenu.refresh()
+		end
+	end)
+
+	HUD.addSideButton("🗺 Mapas", 10, UI.Colors.Accent, function()
+		UI.toggle(PANEL)
+	end)
+end
+
+return MapMenu
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="24">
+          <Properties>
+            <string name="Name">Obstacles</string>
+            <string name="Source"><![CDATA[-- Obstáculos especiales (los simula cada cliente para que vayan suaves):
+--   MovingPlatform: se mueve con el tiempo del servidor y te lleva encima
+--   Trampoline: te lanza hacia arriba
+--   Zipline: salta hacia el cable para engancharte; Espacio para soltarte
+--   LowGravity: dentro de la zona la gravedad es menor
+
+local CollectionService = game:GetService("CollectionService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Sfx = require(Shared:WaitForChild("Sfx"))
+
+local player = Players.LocalPlayer
+
+local Obstacles = {}
+
+-- Personaje actual
+local character: Model? = nil
+local humanoid: Humanoid? = nil
+local root: BasePart? = nil
+local gravityForce: VectorForce? = nil
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+-- Plataformas móviles ------------------------------------------------------------------
+
+type Platform = { base: CFrame, offset: Vector3, period: number, phase: number }
+local platforms: { [BasePart]: Platform } = {}
+
+local function addPlatform(part: Instance)
+	if not part:IsA("BasePart") then
+		return
+	end
+	platforms[part] = {
+		base = part.CFrame,
+		offset = part:GetAttribute("Offset") or Vector3.zero,
+		period = part:GetAttribute("Period") or 3,
+		phase = part:GetAttribute("Phase") or 0,
+	}
+end
+
+local function updatePlatforms()
+	local now = workspace:GetServerTimeNow()
+	local standingOn: Instance? = nil
+	if root and humanoid and humanoid.FloorMaterial ~= Enum.Material.Air then
+		local hit = workspace:Raycast(root.Position, Vector3.new(0, -6, 0), rayParams)
+		standingOn = hit and hit.Instance
+	end
+
+	for part, platform in platforms do
+		local alpha = math.sin((now / platform.period + platform.phase) * math.pi * 2)
+		local target = platform.base + platform.offset * alpha
+		local delta = target.Position - part.Position
+		part.CFrame = target
+		if part == standingOn and root then
+			root.CFrame += delta -- te lleva con ella
+		end
+	end
+end
+
+-- Trampolines --------------------------------------------------------------------------
+
+local lastBounce = 0
+
+local function addTrampoline(part: Instance)
+	if not part:IsA("BasePart") then
+		return
+	end
+	part.Touched:Connect(function(hit)
+		if not character or not root or not humanoid or not hit:IsDescendantOf(character) then
+			return
+		end
+		local now = os.clock()
+		if now - lastBounce < 0.3 then
+			return
+		end
+		lastBounce = now
+		local velocity = root.AssemblyLinearVelocity
+		root.AssemblyLinearVelocity = Vector3.new(velocity.X, part:GetAttribute("Power") or Config.TrampolinePower, velocity.Z)
+		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+		Sfx.play("Bounce", 0.8, 0.6)
+	end)
+end
+
+-- Tirolinas ------------------------------------------------------------------------------
+
+type Zipline = { a: Vector3, b: Vector3, direction: Vector3, length: number }
+local ziplines: { [BasePart]: Zipline } = {}
+
+type Ride = { zipline: Zipline, distance: number, speed: number }
+local riding: Ride? = nil
+local rideCooldown = 0
+
+local HANG_OFFSET = Vector3.new(0, 3.5, 0) -- las manos están por encima del centro del personaje
+
+local function addZipline(part: Instance)
+	if not part:IsA("BasePart") then
+		return
+	end
+	local a = part:GetAttribute("A")
+	local b = part:GetAttribute("B")
+	if typeof(a) ~= "Vector3" or typeof(b) ~= "Vector3" then
+		return
+	end
+	ziplines[part] = { a = a, b = b, direction = (b - a).Unit, length = (b - a).Magnitude }
+end
+
+local function stopRide(jump: boolean)
+	local ride = riding
+	if not ride then
+		return
+	end
+	riding = nil
+	rideCooldown = os.clock() + 0.5
+	if character then
+		character:SetAttribute("Riding", false)
+	end
+	if humanoid and root then
+		humanoid.PlatformStand = false
+		local up = if jump then Config.JumpPower * 0.8 else 0
+		root.AssemblyLinearVelocity = ride.zipline.direction * ride.speed + Vector3.new(0, up, 0)
+		humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+	end
+end
+
+local function tryGrab()
+	if not root or not humanoid or humanoid.FloorMaterial ~= Enum.Material.Air or os.clock() < rideCooldown then
+		return
+	end
+	local hands = root.Position + HANG_OFFSET
+	for _, zipline in ziplines do
+		local t = math.clamp((hands - zipline.a):Dot(zipline.direction), 0, zipline.length)
+		if t < zipline.length * 0.85 then
+			local closest = zipline.a + zipline.direction * t
+			if (hands - closest).Magnitude < Config.ZiplineGrabDistance then
+				local velocity = root.AssemblyLinearVelocity
+				riding = {
+					zipline = zipline,
+					distance = t,
+					speed = math.max(Vector3.new(velocity.X, 0, velocity.Z).Magnitude, Config.ZiplineMinSpeed),
+				}
+				humanoid.PlatformStand = true
+				if character then
+					character:SetAttribute("Riding", true)
+				end
+				return
+			end
+		end
+	end
+end
+
+local function updateRide(dt: number)
+	local ride = riding
+	if not ride or not root then
+		return
+	end
+	local zipline = ride.zipline
+	-- Acelera con la pendiente
+	local slope = -zipline.direction.Y
+	ride.speed = math.min(ride.speed + (workspace.Gravity * slope + 8) * dt, Config.ZiplineMaxSpeed)
+	ride.distance += ride.speed * dt
+	if ride.distance >= zipline.length then
+		stopRide(false)
+		return
+	end
+	local point = zipline.a + zipline.direction * ride.distance - HANG_OFFSET
+	local flat = Vector3.new(zipline.direction.X, 0, zipline.direction.Z)
+	root.CFrame = CFrame.lookAt(point, point + flat)
+	root.AssemblyLinearVelocity = zipline.direction * ride.speed
+end
+
+-- Gravedad baja ----------------------------------------------------------------------------
+
+local zones: { BasePart } = {}
+
+local function addZone(part: Instance)
+	if part:IsA("BasePart") then
+		table.insert(zones, part)
+	end
+end
+
+local function updateGravity()
+	if not root or not gravityForce then
+		return
+	end
+	local factor = 1
+	for _, zone in zones do
+		local relative = zone.CFrame:PointToObjectSpace(root.Position)
+		local half = zone.Size / 2
+		if math.abs(relative.X) <= half.X and math.abs(relative.Y) <= half.Y and math.abs(relative.Z) <= half.Z then
+			factor = math.min(factor, zone:GetAttribute("Gravity") or Config.LowGravityFactor)
+		end
+	end
+	if factor < 1 then
+		gravityForce.Force = Vector3.new(0, root.AssemblyMass * workspace.Gravity * (1 - factor), 0)
+		gravityForce.Enabled = true
 	else
-		local diff = time - best
-		showPopup(string.format("%s  (+%.3f)", Config.FormatTime(time), diff), Color3.fromRGB(255, 120, 120))
-		Sfx.play("Finish", 1, 0.5)
+		gravityForce.Enabled = false
 	end
-end)
+end
 
-remotes:WaitForChild("RaceCancelled").OnClientEvent:Connect(function(reason: string?)
-	running = false
-	hideCountdown()
-	timerLabel.Text = Config.FormatTime(0)
-	timerLabel.TextColor3 = Color3.new(1, 1, 1)
-	checkpointLabel.Text = "Cruza la salida azul para empezar"
-	if reason then
-		showPopup(reason, Color3.fromRGB(255, 120, 120))
+-- Inicio ---------------------------------------------------------------------------------
+
+local function onCharacter(newCharacter: Model)
+	riding = nil
+	character = newCharacter
+	humanoid = newCharacter:WaitForChild("Humanoid") :: Humanoid
+	root = newCharacter:WaitForChild("HumanoidRootPart") :: BasePart
+	rayParams.FilterDescendantsInstances = { newCharacter }
+
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "GravityAttachment"
+	attachment.Parent = root
+	local force = Instance.new("VectorForce")
+	force.Attachment0 = attachment
+	force.RelativeTo = Enum.ActuatorRelativeTo.World
+	force.ApplyAtCenterOfMass = true
+	force.Enabled = false
+	force.Parent = root
+	gravityForce = force
+end
+
+local function watchTag(tag: string, callback: (Instance) -> ())
+	for _, instance in CollectionService:GetTagged(tag) do
+		callback(instance)
 	end
-end)
+	CollectionService:GetInstanceAddedSignal(tag):Connect(callback)
+end
 
--- Reiniciar ---------------------------------------------------------------------
+function Obstacles.start()
+	watchTag("MovingPlatform", addPlatform)
+	watchTag("Trampoline", addTrampoline)
+	watchTag("Zipline", addZipline)
+	watchTag("LowGravity", addZone)
 
-local requestRestart = remotes:WaitForChild("RequestRestart") :: RemoteEvent
-ContextActionService:BindAction("ParkourRestart", function(_, inputState)
-	if inputState == Enum.UserInputState.Begin then
-		requestRestart:FireServer()
+	if player.Character then
+		task.spawn(onCharacter, player.Character)
 	end
-	return Enum.ContextActionResult.Sink
-end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonY)
-ContextActionService:SetTitle("ParkourRestart", "Reiniciar")
-ContextActionService:SetPosition("ParkourRestart", UDim2.new(1, -170, 1, -170))
+	player.CharacterAdded:Connect(onCharacter)
+
+	-- Al teletransportarte (checkpoint, reinicio) te sueltas de la tirolina
+	player:GetAttributeChangedSignal("TeleportTick"):Connect(function()
+		if riding then
+			riding = nil
+			rideCooldown = os.clock() + 0.5
+			if humanoid then
+				humanoid.PlatformStand = false
+			end
+			if character then
+				character:SetAttribute("Riding", false)
+			end
+		end
+	end)
+
+	UserInputService.JumpRequest:Connect(function()
+		if riding then
+			stopRide(true)
+		end
+	end)
+
+	RunService.PreSimulation:Connect(function(dt)
+		if humanoid and humanoid.Health <= 0 then
+			return
+		end
+		updatePlatforms()
+		if riding then
+			updateRide(dt)
+		else
+			tryGrab()
+		end
+		updateGravity()
+	end)
+end
+
+return Obstacles
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="25">
+          <Properties>
+            <string name="Name">UI</string>
+            <string name="Source"><![CDATA[-- Pequeña librería para crear la interfaz con un estilo común.
+
+local TweenService = game:GetService("TweenService")
+
+local UI = {}
+
+UI.Colors = {
+	Background = Color3.fromRGB(18, 20, 30),
+	Panel = Color3.fromRGB(28, 31, 45),
+	Card = Color3.fromRGB(38, 42, 60),
+	Accent = Color3.fromRGB(0, 170, 255),
+	Text = Color3.new(1, 1, 1),
+	Muted = Color3.fromRGB(160, 165, 190),
+	Good = Color3.fromRGB(0, 230, 120),
+	Bad = Color3.fromRGB(255, 90, 90),
+	Gold = Color3.fromRGB(255, 205, 40),
+}
+
+function UI.new(className: string, props: { [string]: any }?, parent: Instance?): any
+	local instance = Instance.new(className)
+	for key, value in (props or {}) :: { [string]: any } do
+		(instance :: any)[key] = value
+	end
+	instance.Parent = parent
+	return instance
+end
+
+function UI.corner(parent: Instance, radius: number?)
+	UI.new("UICorner", { CornerRadius = UDim.new(0, radius or 10) }, parent)
+end
+
+function UI.padding(parent: Instance, pixels: number)
+	local p = UDim.new(0, pixels)
+	UI.new("UIPadding", { PaddingTop = p, PaddingBottom = p, PaddingLeft = p, PaddingRight = p }, parent)
+end
+
+function UI.label(parent: Instance, props: { [string]: any }): TextLabel
+	local label = UI.new("TextLabel", {
+		BackgroundTransparency = 1,
+		Font = Enum.Font.GothamBold,
+		TextColor3 = UI.Colors.Text,
+		TextScaled = true,
+	}, nil)
+	for key, value in props do
+		(label :: any)[key] = value
+	end
+	label.Parent = parent
+	return label
+end
+
+function UI.button(parent: Instance, text: string, color: Color3?, props: { [string]: any }?): TextButton
+	local button = UI.new("TextButton", {
+		BackgroundColor3 = color or UI.Colors.Accent,
+		Font = Enum.Font.GothamBlack,
+		TextColor3 = UI.Colors.Text,
+		TextScaled = true,
+		Text = text,
+		AutoButtonColor = true,
+	}, nil)
+	for key, value in (props or {}) :: { [string]: any } do
+		(button :: any)[key] = value
+	end
+	UI.corner(button, 8)
+	UI.new("UITextSizeConstraint", { MaxTextSize = 28 }, button)
+	button.Parent = parent
+	return button
+end
+
+-- Escala un elemento según el tamaño de la pantalla (móviles más pequeño)
+function UI.autoScale(guiObject: GuiObject, minScale: number?)
+	local scale = UI.new("UIScale", nil, guiObject)
+	local camera = workspace.CurrentCamera
+	local function update()
+		local size = camera.ViewportSize
+		scale.Scale = math.clamp(math.min(size.X / 1100, size.Y / 650), minScale or 0.55, 1)
+	end
+	update()
+	camera:GetPropertyChangedSignal("ViewportSize"):Connect(update)
+end
+
+-- Paneles: solo uno abierto a la vez -----------------------------------------------
+
+local panels: { [string]: { frame: GuiObject, onOpen: (() -> ())? } } = {}
+local openName: string? = nil
+
+function UI.panel(gui: ScreenGui, name: string, title: string, size: UDim2): (Frame, Frame)
+	local frame = UI.new("Frame", {
+		Name = name,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = size,
+		BackgroundColor3 = UI.Colors.Panel,
+		Visible = false,
+	}, gui)
+	UI.corner(frame, 14)
+	UI.new("UIStroke", { Color = UI.Colors.Accent, Thickness = 2, Transparency = 0.4 }, frame)
+	UI.autoScale(frame)
+
+	UI.label(frame, {
+		Name = "Title",
+		Size = UDim2.new(1, -120, 0, 40),
+		Position = UDim2.fromOffset(20, 14),
+		Font = Enum.Font.GothamBlack,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = title,
+	})
+
+	local close = UI.button(frame, "X", UI.Colors.Bad, {
+		Name = "Close",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -14, 0, 14),
+		Size = UDim2.fromOffset(40, 40),
+	})
+	close.Activated:Connect(function()
+		UI.close(name)
+	end)
+
+	local content = UI.new("Frame", {
+		Name = "Content",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(20, 66),
+		Size = UDim2.new(1, -40, 1, -86),
+	}, frame)
+
+	panels[name] = { frame = frame }
+	return frame, content
+end
+
+function UI.onOpen(name: string, callback: () -> ())
+	panels[name].onOpen = callback
+end
+
+function UI.open(name: string)
+	for other, panel in panels do
+		panel.frame.Visible = other == name
+	end
+	openName = name
+	local panel = panels[name]
+	if panel.onOpen then
+		panel.onOpen()
+	end
+	local scale = panel.frame:FindFirstChildOfClass("UIScale")
+	if scale then
+		local target = scale.Scale
+		scale.Scale = target * 0.9
+		TweenService:Create(scale, TweenInfo.new(0.15, Enum.EasingStyle.Back), { Scale = target }):Play()
+	end
+end
+
+function UI.close(name: string?)
+	local target = name or openName
+	if target and panels[target] then
+		panels[target].frame.Visible = false
+	end
+	if target == openName then
+		openName = nil
+	end
+end
+
+function UI.toggle(name: string)
+	if openName == name then
+		UI.close(name)
+	else
+		UI.open(name)
+	end
+end
+
+function UI.isOpen(name: string): boolean
+	return openName == name
+end
+
+return UI
 ]]></string>
           </Properties>
         </Item>
       </Item>
     </Item>
+  </Item>
+  <Item class="Workspace" referent="26">
+    <Properties>
+      <string name="Name">Workspace</string>
+      <bool name="NeedsPivotMigration">false</bool>
+      <bool name="StreamingEnabled">false</bool>
+    </Properties>
   </Item>
 </roblox>

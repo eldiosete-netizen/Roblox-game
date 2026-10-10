@@ -195,6 +195,13 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 	end
 	humanoid.JumpPower = Config.JumpPower
 
+	-- En la tirolina manda el script de obstáculos
+	if character:GetAttribute("Riding") then
+		stopWallRun()
+		setParkourState("None")
+		return
+	end
+
 	local now = os.clock()
 	local moving = humanoid.MoveDirection.Magnitude > 0.1
 

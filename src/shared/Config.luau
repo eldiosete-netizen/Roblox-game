@@ -45,17 +45,65 @@ local Config = {
 		WallJump = "rbxasset://sounds/swoosh.wav",
 		Land = "rbxasset://sounds/action_jump_land.mp3",
 		Wind = "rbxasset://sounds/action_falling.mp3",
+		Bounce = "rbxasset://sounds/action_jump.mp3",
+		Medal = "rbxasset://sounds/electronicpingshort.wav",
 	},
 
 	-- Carrera
 	CountdownSeconds = 3,
-	CourseHeight = 50, -- altura del circuito generado
+	CourseHeight = 50, -- altura a la que se generan lobby y mapas
+	MapSpacing = 300, -- separación entre mapas generados
 	FallY = 20, -- si caes por debajo de esta Y, vuelves al último checkpoint
 	MinValidTime = 5, -- tiempos más rápidos se consideran trampa
-	LeaderboardSize = 10,
-	LeaderboardRefresh = 60, -- segundos entre actualizaciones del ranking global
-	DataStoreName = "ParkourBestTimes_v1",
+	LeaderboardSize = 8,
+	LeaderboardRefresh = 120, -- segundos entre lecturas del ranking global
+
+	-- Obstáculos
+	TrampolinePower = 110,
+	LowGravityFactor = 0.35, -- 1 = gravedad normal
+	ZiplineMinSpeed = 30,
+	ZiplineMaxSpeed = 70,
+	ZiplineGrabDistance = 3.5,
+
+	-- Ajustes por defecto del jugador
+	DefaultSettings = {
+		shake = true, -- temblor de cámara
+		fov = true, -- efecto de velocidad en la cámara
+		ghost = true, -- mostrar el fantasma
+		wind = true, -- sonido de viento
+		hints = true, -- mostrar controles en pantalla
+	},
+
+	-- Guardado
+	DataStores = {
+		Player = "PlayerData_v1",
+		TimesPrefix = "Times_v1_",
+	},
+	AutosaveInterval = 120,
 }
+
+-- Medallas de mejor a peor. El tiempo de cada una se define por mapa.
+Config.Medals = {
+	{ id = "Dev", name = "Desarrollador", color = Color3.fromRGB(200, 90, 255) },
+	{ id = "Gold", name = "Oro", color = Color3.fromRGB(255, 205, 40) },
+	{ id = "Silver", name = "Plata", color = Color3.fromRGB(200, 210, 225) },
+	{ id = "Bronze", name = "Bronce", color = Color3.fromRGB(205, 127, 70) },
+}
+
+-- Rango de medalla: 4 = Desarrollador, 3 = Oro, 2 = Plata, 1 = Bronce, 0 = ninguna
+function Config.MedalRank(seconds: number, times: { [string]: number }): number
+	for i, medal in Config.Medals do
+		local limit = times[medal.id]
+		if limit and seconds <= limit then
+			return #Config.Medals - i + 1
+		end
+	end
+	return 0
+end
+
+function Config.MedalInfo(rank: number)
+	return Config.Medals[#Config.Medals - rank + 1]
+end
 
 function Config.FormatTime(seconds: number?): string
 	if not seconds then

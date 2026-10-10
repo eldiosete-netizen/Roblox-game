@@ -1,6 +1,5 @@
--- Guarda los mejores tiempos (OrderedDataStore) y muestra el ranking global.
--- En Studio, activa "Enable Studio Access to API Services" para que se guarde.
--- Sin acceso a DataStore, el ranking sigue funcionando con los tiempos de la sesión.
+-- Ranking global por mapa (OrderedDataStore) y carteles del lobby.
+-- Sin acceso a DataStore, el ranking funciona con los tiempos de la sesión.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -10,14 +9,47 @@ local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Co
 
 local Leaderboard = {}
 
-local store: OrderedDataStore? = nil
-pcall(function()
-	store = DataStoreService:GetOrderedDataStore(Config.DataStoreName)
-end)
+export type Entry = { userId: number, name: string, seconds: number }
 
-local sessionBests: { [number]: number } = {}
+type Board = {
+	cached: { [string]: { [number]: number } }, -- último resultado del DataStore
+	session: { [string]: { [number]: number } }, -- tiempos de esta sesión
+	renderers: { () -> () },
+}
+
+local boards: { [string]: Board } = {}
 local names: { [number]: string } = {}
-local refreshCallbacks: { () -> () } = {}
+
+local PERIODS = { "all" }
+
+local function storeName(mapId: string, period: string): string
+	return Config.DataStores.TimesPrefix .. mapId
+end
+
+local function getBoard(mapId: string): Board
+	local board = boards[mapId]
+	if board then
+		return board
+	end
+	board = { cached = {}, session = {}, renderers = {} }
+	for _, period in PERIODS do
+		board.cached[period] = {}
+		board.session[period] = {}
+	end
+	boards[mapId] = board
+	return board
+end
+
+local storeCache: { [string]: any } = {} -- nombre -> OrderedDataStore | false
+
+local function getStore(mapId: string, period: string): OrderedDataStore?
+	local name = storeName(mapId, period)
+	if storeCache[name] == nil then
+		local ok, store = pcall(DataStoreService.GetOrderedDataStore, DataStoreService, name)
+		storeCache[name] = if ok then store else false
+	end
+	return storeCache[name] or nil
+end
 
 local function getName(userId: number): string
 	if names[userId] then
@@ -28,76 +60,79 @@ local function getName(userId: number): string
 	return names[userId]
 end
 
--- Devuelve el mejor tiempo guardado (en segundos) o nil
-function Leaderboard.loadBest(userId: number): number?
-	if not store then
-		return nil
+local function render(mapId: string)
+	for _, renderer in getBoard(mapId).renderers do
+		task.spawn(renderer)
 	end
-	local ok, value = pcall(function()
-		return store:GetAsync(tostring(userId))
-	end)
-	if ok and typeof(value) == "number" then
-		return value / 1000
-	end
-	return nil
 end
 
-function Leaderboard.submit(player: Player, seconds: number)
+function Leaderboard.submit(player: Player, mapId: string, seconds: number)
+	local board = getBoard(mapId)
 	local userId = player.UserId
 	names[userId] = player.Name
-	if not sessionBests[userId] or seconds < sessionBests[userId] then
-		sessionBests[userId] = seconds
-	end
+	local ms = math.floor(seconds * 1000 + 0.5)
 
-	if store then
-		local ms = math.floor(seconds * 1000 + 0.5)
-		task.spawn(function()
-			local ok, err = pcall(function()
-				store:UpdateAsync(tostring(userId), function(old)
-					if typeof(old) == "number" and old <= ms then
-						return nil -- el récord guardado ya es mejor
-					end
-					return ms
+	for _, period in PERIODS do
+		local session = board.session[period]
+		if not session[userId] or seconds < session[userId] then
+			session[userId] = seconds
+		end
+		local store = getStore(mapId, period)
+		if store then
+			task.spawn(function()
+				local ok, err = pcall(function()
+					store:UpdateAsync(tostring(userId), function(old)
+						if typeof(old) == "number" and old <= ms then
+							return nil
+						end
+						return ms
+					end)
 				end)
-			end)
-			if not ok then
-				warn("[Leaderboard] No se pudo guardar el tiempo:", err)
-			end
-		end)
-	end
-
-	for _, refresh in refreshCallbacks do
-		task.spawn(refresh)
-	end
-end
-
-export type Entry = { userId: number, name: string, seconds: number }
-
-function Leaderboard.getTop(count: number): { Entry }
-	local byUser: { [number]: number } = {}
-
-	if store then
-		local ok, pages = pcall(function()
-			return store:GetSortedAsync(true, count)
-		end)
-		if ok then
-			for _, item in pages:GetCurrentPage() do
-				local userId = tonumber(item.key)
-				if userId then
-					byUser[userId] = item.value / 1000
+				if not ok then
+					warn("[Leaderboard] No se pudo guardar el tiempo:", err)
 				end
-			end
+			end)
 		end
 	end
+	render(mapId)
+end
 
-	for userId, seconds in sessionBests do
-		if not byUser[userId] or seconds < byUser[userId] then
-			byUser[userId] = seconds
+-- Lee el DataStore (gasta peticiones; se llama cada LeaderboardRefresh)
+local function fetch(mapId: string, period: string)
+	local store = getStore(mapId, period)
+	if not store then
+		return
+	end
+	local ok, pages = pcall(function()
+		return store:GetSortedAsync(true, Config.LeaderboardSize)
+	end)
+	if not ok then
+		return
+	end
+	local result = {}
+	for _, item in pages:GetCurrentPage() do
+		local userId = tonumber(item.key)
+		if userId then
+			result[userId] = item.value / 1000
+		end
+	end
+	getBoard(mapId).cached[period] = result
+end
+
+function Leaderboard.getTop(mapId: string, period: string, count: number): { Entry }
+	local board = getBoard(mapId)
+	local merged: { [number]: number } = {}
+	for userId, seconds in board.cached[period] or {} do
+		merged[userId] = seconds
+	end
+	for userId, seconds in board.session[period] or {} do
+		if not merged[userId] or seconds < merged[userId] then
+			merged[userId] = seconds
 		end
 	end
 
 	local list = {}
-	for userId, seconds in byUser do
+	for userId, seconds in merged do
 		table.insert(list, { userId = userId, seconds = seconds, name = "" })
 	end
 	table.sort(list, function(a, b)
@@ -106,15 +141,27 @@ function Leaderboard.getTop(count: number): { Entry }
 
 	local result = {}
 	for i = 1, math.min(count, #list) do
-		local entry = list[i]
-		entry.name = getName(entry.userId)
-		result[i] = entry
+		list[i].name = getName(list[i].userId)
+		result[i] = list[i]
 	end
 	return result
 end
 
--- Crea un SurfaceGui con el top en la cara frontal de la Part
-function Leaderboard.startBoard(part: BasePart)
+local function makeLabel(parent: Instance, props: { [string]: any }): TextLabel
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.TextColor3 = Color3.new(1, 1, 1)
+	for key, value in props do
+		(label :: any)[key] = value
+	end
+	label.Parent = parent
+	return label
+end
+
+-- Dibuja el ranking de un mapa en la cara frontal de una Part
+function Leaderboard.startBoard(part: BasePart, mapId: string, title: string, color: Color3)
 	local gui = Instance.new("SurfaceGui")
 	gui.Face = Enum.NormalId.Front
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
@@ -127,62 +174,59 @@ function Leaderboard.startBoard(part: BasePart)
 	frame.BorderSizePixel = 0
 	frame.Parent = gui
 
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 20)
-	padding.PaddingLeft = UDim.new(0, 30)
-	padding.PaddingRight = UDim.new(0, 30)
-	padding.Parent = frame
+	makeLabel(frame, {
+		Size = UDim2.new(1, -40, 0, 70),
+		Position = UDim2.fromOffset(20, 10),
+		Font = Enum.Font.GothamBlack,
+		TextColor3 = color,
+		Text = "🏆 " .. title,
+	})
 
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 6)
-	layout.Parent = frame
+	local columns = {}
+	for i, period in PERIODS do
+		local column = Instance.new("Frame")
+		column.BackgroundTransparency = 1
+		column.Size = UDim2.new(1 / #PERIODS, -30, 1, -100)
+		column.Position = UDim2.new((i - 1) / #PERIODS, 20, 0, 90)
+		column.Parent = frame
 
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, 0, 0, 70)
-	title.BackgroundTransparency = 1
-	title.Font = Enum.Font.GothamBlack
-	title.TextScaled = true
-	title.TextColor3 = Color3.fromRGB(255, 210, 0)
-	title.Text = "🏆 MEJORES TIEMPOS"
-	title.LayoutOrder = 0
-	title.Parent = frame
+		local layout = Instance.new("UIListLayout")
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.Padding = UDim.new(0, 4)
+		layout.Parent = column
 
-	local rows = {}
-	for i = 1, Config.LeaderboardSize do
-		local row = Instance.new("TextLabel")
-		row.Size = UDim2.new(1, 0, 0, 34)
-		row.BackgroundTransparency = 1
-		row.Font = Enum.Font.GothamBold
-		row.TextScaled = true
-		row.TextXAlignment = Enum.TextXAlignment.Left
-		row.TextColor3 = if i <= 3 then Color3.fromRGB(255, 255, 255) else Color3.fromRGB(180, 180, 200)
-		row.Text = string.format("%d. ---", i)
-		row.LayoutOrder = i
-		row.Parent = frame
-		rows[i] = row
+		local rows = {}
+		for rank = 1, Config.LeaderboardSize do
+			rows[rank] = makeLabel(column, {
+				Size = UDim2.new(1, 0, 0, 52),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextColor3 = if rank <= 3 then Color3.new(1, 1, 1) else Color3.fromRGB(170, 170, 190),
+				Text = string.format("%d. ---", rank),
+				LayoutOrder = rank,
+			})
+		end
+		columns[period] = rows
 	end
 
-	local refreshing = false
-	local function refresh()
-		if refreshing then
-			return
+	local function draw()
+		for period, rows in columns do
+			local top = Leaderboard.getTop(mapId, period, Config.LeaderboardSize)
+			for rank, row in rows do
+				local entry = top[rank]
+				row.Text = if entry
+					then string.format("%d. %s  %s", rank, entry.name, Config.FormatTime(entry.seconds))
+					else string.format("%d. ---", rank)
+			end
 		end
-		refreshing = true
-		local top = Leaderboard.getTop(Config.LeaderboardSize)
-		for i, row in rows do
-			local entry = top[i]
-			row.Text = if entry
-				then string.format("%d. %s  —  %s", i, entry.name, Config.FormatTime(entry.seconds))
-				else string.format("%d. ---", i)
-		end
-		refreshing = false
 	end
-	table.insert(refreshCallbacks, refresh)
+	table.insert(getBoard(mapId).renderers, draw)
 
 	task.spawn(function()
 		while part.Parent do
-			refresh()
+			for period in columns do
+				fetch(mapId, period)
+			end
+			draw()
 			task.wait(Config.LeaderboardRefresh)
 		end
 	end)
