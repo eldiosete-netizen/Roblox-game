@@ -53,6 +53,17 @@ function RaceService.addEnterCheck(check: (Player, Maps.MapInfo) -> (boolean, st
 	table.insert(enterChecks, check)
 end
 
+-- ¿Puede este jugador entrar en el mapa por su cuenta? (VIP, nivel desbloqueado...)
+function RaceService.canEnter(player: Player, map: Maps.MapInfo): (boolean, string?)
+	for _, check in enterChecks do
+		local ok, message = check(player, map)
+		if not ok then
+			return false, message
+		end
+	end
+	return true, nil
+end
+
 -- Se llama al terminar, antes de avisar al cliente (puede rellenar result.rewards)
 function RaceService.onFinish(handler: (Player, Maps.MapInfo, Result) -> ())
 	table.insert(finishHandlers, handler)

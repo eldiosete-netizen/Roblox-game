@@ -3,7 +3,7 @@
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "2.7",
+	Version = "2.8",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -75,9 +75,11 @@ local Config = {
 
 	-- Carrera en vivo (todos a la vez)
 	LiveRace = {
-		MinPlayers = 2, -- ponlo a 1 para probar solo en Studio
-		Intermission = 15, -- segundos de espera antes de empezar
+		MinPlayers = 2, -- jugadores mínimos para empezar (ponlo a 1 para probar solo en Studio)
+		MaxPlayers = 8, -- jugadores máximos por sala
+		StartDelay = 5, -- segundos desde que el anfitrión pulsa "Empezar" hasta la salida
 		TimeLimit = 180, -- segundos máximos de carrera
+		ResultsTime = 8, -- segundos mostrando los resultados
 	},
 
 	-- Recompensas

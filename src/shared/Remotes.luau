@@ -21,13 +21,13 @@ local EVENTS = {
 	-- Competición
 	"GhostData", -- (mapId, encoded?)
 	"SubmitGhost", -- (mapId, encoded)
-	"LiveRaceUpdate", -- (status)
+	"LiveRaceUpdate", -- ({ rooms = lista de salas, room = tu sala o nil })
 	"OpenMenu", -- (panelName) el servidor pide abrir un menú (p. ej. al tocar un portal bloqueado)
 }
 
 local FUNCTIONS = {
 	"RequestMap", -- (mapId) -> ok, message
-	"SetLiveRaceQueue", -- (join) -> ok, message
+	"LiveRoomAction", -- (acción, argumento) -> ok, message · acciones: create, join, leave, setMap, start, refresh
 	"Purchase", -- (itemId) -> ok, message
 	"Equip", -- (itemId) -> ok, message
 	"GetLeaderboard", -- (mapId) -> { all = entries, week = entries }
