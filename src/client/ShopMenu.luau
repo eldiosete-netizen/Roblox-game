@@ -1,7 +1,8 @@
--- Tienda: rastros, efectos de salto y de deslizamiento, y el pase VIP.
+-- Tienda: rastros, efectos de salto y de deslizamiento (con monedas) y
+-- pases de Robux (VIP y multiplicadores de monedas, que se compran en orden).
 
 local MarketplaceService = game:GetService("MarketplaceService")
-local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -14,24 +15,23 @@ local HUD = require(script.Parent:WaitForChild("HUD"))
 local MapMenu = require(script.Parent:WaitForChild("MapMenu"))
 local UI = require(script.Parent:WaitForChild("UI"))
 
-local player = Players.LocalPlayer
-
 local ShopMenu = {}
 
 local PANEL = "Shop"
+local PASSES = "Passes" -- pestaña de Robux
 
 local currentKind = "Trail"
 local grid: ScrollingFrame
 local tabButtons: { [string]: TextButton } = {}
-local vipButton: TextButton
 local panelFrame: Frame
 
+-- El servidor comprueba que se pueda comprar (orden de los pases) y abre la compra
+function ShopMenu.promptPass(key: string)
+	Remotes.PromptPass:FireServer(key)
+end
+
 function ShopMenu.promptVip()
-	if Config.VipGamePassId == 0 then
-		HUD.popup("El pase VIP aún no está configurado", UI.Colors.Bad, "Pon el ID del Game Pass en Config.VipGamePassId")
-		return
-	end
-	MarketplaceService:PromptGamePassPurchase(player, Config.VipGamePassId)
+	ShopMenu.promptPass("vip")
 end
 
 local function itemState(item: Catalog.Item): string
@@ -70,17 +70,122 @@ local function onItemClicked(item: Catalog.Item, state: string)
 	end
 end
 
-local function refresh()
-	for kind, button in tabButtons do
-		button.BackgroundColor3 = if kind == currentKind then UI.Colors.Accent else UI.Colors.Card
+-- Pases de Robux ----------------------------------------------------------------------
+
+type PassInfo = { key: string, id: number, title: string, description: string, requires: string?, requiresName: string? }
+
+local function passList(): { PassInfo }
+	local list = {
+		{
+			key = "vip",
+			id = Config.VipGamePassId,
+			title = "⭐ VIP",
+			description = "Mapa Cielo, objetos exclusivos y +50% monedas",
+		},
+	}
+	for i, pass in Config.CoinPasses do
+		local previous = Config.CoinPasses[i - 1]
+		table.insert(list, {
+			key = pass.key,
+			id = pass.id,
+			title = string.format("🪙 x%d", pass.multiplier),
+			description = string.format("Ganas %d veces más monedas", pass.multiplier),
+			requires = previous and previous.key,
+			requiresName = previous and string.format("x%d", previous.multiplier),
+		})
 	end
+	return list
+end
+
+local prices: { [number]: number | false } = {}
+local refresh: () -> ()
+
+local function priceText(id: number): string
+	local price = prices[id]
+	if price == nil then
+		prices[id] = false
+		task.spawn(function()
+			local ok, info = pcall(MarketplaceService.GetProductInfo, MarketplaceService, id, Enum.InfoType.GamePass)
+			prices[id] = if ok and info and info.PriceInRobux then info.PriceInRobux else false
+			if panelFrame.Visible and currentKind == PASSES then
+				refresh()
+			end
+		end)
+	end
+	return if typeof(price) == "number" then string.format("R$ %d", price) else "Comprar"
+end
+
+local function renderPasses()
 	local data = ClientState.data
-	vipButton.Text = if data and data.vip then "⭐ Eres VIP" else "⭐ Hazte VIP"
+	local owned = data and data.ownedPasses or {}
+	for i, pass in passList() do
+		local card = UI.new("Frame", {
+			Name = pass.key,
+			BackgroundColor3 = UI.Colors.Card,
+			LayoutOrder = i,
+		}, grid)
+		UI.corner(card, 10)
+		UI.new("UIStroke", { Color = UI.Colors.Gold, Thickness = 2, Transparency = 0.5 }, card)
+
+		UI.label(card, {
+			Position = UDim2.fromOffset(8, 8),
+			Size = UDim2.new(1, -16, 0, 44),
+			Font = Enum.Font.GothamBlack,
+			TextColor3 = UI.Colors.Gold,
+			Text = pass.title,
+		})
+		UI.label(card, {
+			Position = UDim2.fromOffset(8, 54),
+			Size = UDim2.new(1, -16, 0, 40),
+			Font = Enum.Font.Gotham,
+			TextColor3 = UI.Colors.Muted,
+			TextWrapped = true,
+			Text = pass.description,
+		})
+
+		local text, color, textColor, action = "", UI.Colors.Card, UI.Colors.Text, nil
+		if owned[pass.key] then
+			text, color = "✓ Comprado", UI.Colors.Good
+		elseif pass.id == 0 then
+			text, textColor = "Próximamente", UI.Colors.Muted
+		elseif pass.requires and not owned[pass.requires] then
+			text, textColor = "🔒 Antes " .. (pass.requiresName or ""), UI.Colors.Muted
+			action = function()
+				HUD.popup("Primero compra Monedas " .. (pass.requiresName or ""), UI.Colors.Bad)
+			end
+		else
+			text, color, textColor = priceText(pass.id), UI.Colors.Gold, UI.Colors.Background
+			action = function()
+				ShopMenu.promptPass(pass.key)
+			end
+		end
+		local button = UI.button(card, text, color, {
+			Position = UDim2.new(0, 10, 1, -46),
+			Size = UDim2.new(1, -20, 0, 36),
+			TextColor3 = textColor,
+		})
+		if action then
+			button.Activated:Connect(action)
+		end
+	end
+end
+
+function refresh()
+	for kind, button in tabButtons do
+		local selected = kind == currentKind
+		button.BackgroundColor3 = if selected then UI.Colors.Accent elseif kind == PASSES then UI.Colors.Gold else UI.Colors.Card
+		button.TextColor3 = if kind == PASSES and not selected then UI.Colors.Background else UI.Colors.Text
+	end
 
 	for _, child in grid:GetChildren() do
 		if child:IsA("Frame") then
 			child:Destroy()
 		end
+	end
+
+	if currentKind == PASSES then
+		renderPasses()
+		return
 	end
 
 	for i, item in Catalog.Items do
@@ -132,6 +237,13 @@ local function refresh()
 	end
 end
 
+function ShopMenu.open(kind: string?)
+	if kind then
+		currentKind = kind
+	end
+	UI.open(PANEL)
+end
+
 function ShopMenu.start()
 	local frame, content = UI.panel(HUD.gui, PANEL, "🛒  Tienda", UDim2.fromOffset(720, 560))
 	panelFrame = frame
@@ -156,19 +268,16 @@ function ShopMenu.start()
 		end)
 		tabButtons[kind.id] = button
 	end
-	vipButton = UI.button(tabs, "⭐ Hazte VIP", UI.Colors.Gold, {
+	local passesButton = UI.button(tabs, "⭐ Robux", UI.Colors.Gold, {
 		Size = UDim2.fromOffset(170, 44),
 		LayoutOrder = 10,
 		TextColor3 = UI.Colors.Background,
 	})
-	vipButton.Activated:Connect(function()
-		local data = ClientState.data
-		if data and data.vip then
-			HUD.popup("VIP: mapa Cielo, objetos exclusivos y +50% de monedas", UI.Colors.Gold)
-		else
-			ShopMenu.promptVip()
-		end
+	passesButton.Activated:Connect(function()
+		currentKind = PASSES
+		refresh()
 	end)
+	tabButtons[PASSES] = passesButton
 
 	grid = UI.new("ScrollingFrame", {
 		Position = UDim2.fromOffset(0, 54),
@@ -194,6 +303,13 @@ function ShopMenu.start()
 
 	HUD.addSideButton("🛒 Tienda", 20, UI.Colors.Gold, function()
 		UI.toggle(PANEL)
+	end)
+
+	-- Puesto de tienda del lobby: abre directamente los pases
+	ProximityPromptService.PromptTriggered:Connect(function(prompt)
+		if prompt.Name == "ShopPrompt" then
+			ShopMenu.open(PASSES)
+		end
 	end)
 
 	-- Mapas VIP bloqueados en el selector

@@ -599,6 +599,96 @@ local function buildPortal(portals: Folder, map: Folder, base: Vector3)
 
 end
 
+-- Puesto de tienda: mostrador, toldo de rayas, cartel y monedas que giran.
+-- Al acercarse aparece "Abrir tienda" (lo abre el cliente, ver ShopMenu).
+local function buildShopStand(lobby: Folder, base: Vector3, facing: Vector3)
+	local gold = Color3.fromRGB(255, 205, 40)
+	local purple = Color3.fromRGB(170, 80, 255)
+	-- Marco local: -Z mira hacia "facing" (el frente del puesto)
+	local frame = CFrame.lookAt(base, base + facing)
+	local stand = Instance.new("Folder")
+	stand.Name = "ShopStand"
+	stand.Parent = lobby
+
+	local function piece(name: string, size: Vector3, offset: CFrame, props: { [string]: any }?): BasePart
+		local part = newPart("Part", { Name = name, Size = size, CFrame = frame * offset, Color = DARK_METAL }, stand)
+		for key, value in (props or {}) :: { [string]: any } do
+			(part :: any)[key] = value
+		end
+		return part
+	end
+
+	piece("Mat", Vector3.new(16, 0.2, 12), CFrame.new(0, 0.1, -1), { Color = Color3.fromRGB(40, 30, 60) })
+	piece("MatGlow", Vector3.new(16.4, 0.15, 12.4), CFrame.new(0, 0.07, -1), { Color = gold, Material = Enum.Material.Neon })
+	piece("BackWall", Vector3.new(14, 10, 0.6), CFrame.new(0, 5, 3), { Material = Enum.Material.Metal })
+	local counter = piece("Counter", Vector3.new(12, 3.5, 2.5), CFrame.new(0, 1.75, -1.5), {
+		Color = Color3.fromRGB(120, 85, 60),
+		Material = Enum.Material.Wood,
+	})
+	piece("CounterTop", Vector3.new(12.4, 0.3, 2.9), CFrame.new(0, 3.6, -1.5), { Color = gold, Material = Enum.Material.Neon })
+
+	for _, side in { -6.5, 6.5 } do
+		piece("Post", Vector3.new(0.8, 9.5, 0.8), CFrame.new(side, 4.75, -3), { Material = Enum.Material.Metal })
+		piece("Post", Vector3.new(0.8, 9.5, 0.8), CFrame.new(side, 4.75, 3), { Material = Enum.Material.Metal })
+	end
+
+	-- Toldo de rayas inclinado
+	for i = 0, 6 do
+		piece(
+			"Awning",
+			Vector3.new(2, 0.3, 7.5),
+			CFrame.new(-6 + i * 2, 9.8, -0.2) * CFrame.Angles(math.rad(-12), 0, 0),
+			{ Color = if i % 2 == 0 then gold else purple, Material = Enum.Material.SmoothPlastic }
+		)
+	end
+
+	local sign = piece("Sign", Vector3.new(12, 2.6, 0.5), CFrame.new(0, 12.2, -3.3))
+	namePlate(sign, "🛒 TIENDA", gold)
+
+	-- Pilas de monedas en el mostrador
+	for i, offset in { -4, -2.6, 3.4 } do
+		for level = 1, 4 - i do
+			piece("Coin", Vector3.new(0.3, 1.4, 1.4), CFrame.new(offset, 3.75 + level * 0.32, -1.5) * CFrame.Angles(0, 0, math.rad(90)), {
+				Shape = Enum.PartType.Cylinder,
+				Color = gold,
+				Material = Enum.Material.Neon,
+				CanCollide = false,
+			})
+		end
+	end
+
+	-- Moneda gigante que gira encima del mostrador
+	local spinner = Instance.new("Model")
+	spinner.Name = "BigCoin"
+	local coin = newPart("Part", {
+		Name = "Coin",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.6, 3.2, 3.2),
+		CFrame = frame * CFrame.new(0, 6.6, -1.5) * CFrame.Angles(0, math.rad(90), 0),
+		Color = gold,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+	}, spinner)
+	local light = Instance.new("PointLight")
+	light.Color = gold
+	light.Range = 14
+	light.Brightness = 1.5
+	light.Parent = coin
+	spinner.PrimaryPart = coin
+	spinner:SetAttribute("SpinSpeed", 90)
+	CollectionService:AddTag(spinner, "Spinner")
+	spinner.Parent = stand
+
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "ShopPrompt"
+	prompt.ActionText = "Abrir tienda"
+	prompt.ObjectText = "Tienda"
+	prompt.HoldDuration = 0
+	prompt.MaxActivationDistance = 12
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = counter
+end
+
 -- Zona de rankings: una fila de carteles a la altura de los ojos.
 -- "origin" es el centro de la fila en el suelo y "facing" hacia dónde miran.
 local function buildRankingWall(lobby: Folder, boards: Folder, maps: { Folder }, origin: Vector3, facing: Vector3)
@@ -787,6 +877,7 @@ local function buildLobby(maps: { Folder }): Folder
 	buildRankingWall(lobby, boards, maps, Vector3.new(0, y, 58), Vector3.new(0, 0, -1))
 
 	buildLiveRacePad(lobby, Vector3.new(58, y, 0), Vector3.new(0, y, 20))
+	buildShopStand(lobby, Vector3.new(-60, y, 2), Vector3.new(1, 0, 0))
 
 	LobbyDecor.build(lobby, y)
 

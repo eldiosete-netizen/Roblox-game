@@ -1,6 +1,6 @@
--- Tienda de cosméticos, VIP (Game Pass) y efectos visibles para todos (rastro).
+-- Tienda de cosméticos y efectos visibles para todos (rastro).
+-- Los Game Pass (VIP y monedas) están en Passes.
 
-local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -11,11 +11,8 @@ local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local Economy = require(script.Parent:WaitForChild("Economy"))
 local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
-local RaceService = require(script.Parent:WaitForChild("RaceService"))
 
 local Shop = {}
-
-local VIP_COLOR = Color3.fromRGB(255, 205, 40)
 
 function Shop.isVip(player: Player): boolean
 	return PlayerData.session(player).vip == true
@@ -85,18 +82,6 @@ function Shop.applyCosmetics(player: Player)
 	end
 end
 
-local function checkVip(player: Player)
-	local owned = false
-	if Config.VipGamePassId ~= 0 then
-		local ok, result = pcall(MarketplaceService.UserOwnsGamePassAsync, MarketplaceService, player.UserId, Config.VipGamePassId)
-		owned = ok and result == true
-	end
-	PlayerData.session(player).vip = owned
-	player:SetAttribute("Vip", owned)
-	Shop.applyCosmetics(player)
-	PlayerData.sync(player)
-end
-
 local function purchase(player: Player, itemId: any): (boolean, string?)
 	local data = PlayerData.get(player)
 	local item = typeof(itemId) == "string" and Catalog.byId[itemId]
@@ -138,14 +123,6 @@ function Shop.init()
 	Remotes.Purchase.OnServerInvoke = purchase
 	Remotes.Equip.OnServerInvoke = equip
 
-	PlayerData.addSnapshotField(function(player, snapshot)
-		snapshot.vip = Shop.isVip(player)
-	end)
-
-	PlayerData.onLoaded(function(player)
-		checkVip(player)
-	end)
-
 	local function onPlayerAdded(player: Player)
 		player.CharacterAdded:Connect(function(character)
 			character:WaitForChild("HumanoidRootPart")
@@ -156,24 +133,6 @@ function Shop.init()
 	for _, player in Players:GetPlayers() do
 		onPlayerAdded(player)
 	end
-
-	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player, passId, purchased)
-		if purchased and passId == Config.VipGamePassId then
-			PlayerData.session(player).vip = true
-			player:SetAttribute("Vip", true)
-			Shop.applyCosmetics(player)
-			PlayerData.sync(player)
-			Remotes.Notify:FireClient(player, "⭐ ¡Ya eres VIP! Gracias por tu apoyo", VIP_COLOR)
-		end
-	end)
-
-	-- Mapas solo para VIP
-	RaceService.addEnterCheck(function(player, map)
-		if map.vip and not Shop.isVip(player) then
-			return false, "⭐ Este mapa es solo para VIP"
-		end
-		return true, nil
-	end)
 
 	-- Enciende el rastro cuando el jugador va rápido
 	task.spawn(function()

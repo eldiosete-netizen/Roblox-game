@@ -88,7 +88,9 @@ local function updateStats()
 	local level, current, needed = Config.LevelFromXP(data.xp)
 	levelLabel.Text = string.format("Nivel %d", level) .. (if data.vip then "  ⭐ VIP" else "")
 	xpFill.Size = UDim2.fromScale(math.clamp(current / needed, 0, 1), 1)
+	local multiplier = (data.coinMultiplier or 1) * (if data.vip then Config.VipCoinMultiplier else 1)
 	coinsLabel.Text = string.format("🪙 %d", data.coins)
+		.. (if multiplier > 1 then string.format("   (x%s)", string.format("%g", multiplier)) else "")
 end
 
 local function nextMedalText(mapId: string): string

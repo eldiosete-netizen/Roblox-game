@@ -3,7 +3,7 @@
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "2.0",
+	Version = "2.1",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -98,6 +98,16 @@ local Config = {
 	-- VIP (Game Pass). Crea el pase en el Creator Hub y pon aquí su ID.
 	VipGamePassId = 2026076456,
 	VipCoinMultiplier = 1.5,
+
+	-- Pases de monedas (Game Pass). En la tienda se compran en orden: el x3 se
+	-- desbloquea al tener el x2, etc. Se aplica el más alto que tengas (y se
+	-- suma al +50% del VIP). Con id = 0 el pase sale como "Próximamente".
+	CoinPasses = {
+		{ key = "coins2", multiplier = 2, id = 0 },
+		{ key = "coins3", multiplier = 3, id = 0 },
+		{ key = "coins5", multiplier = 5, id = 0 },
+		{ key = "coins10", multiplier = 10, id = 0 },
+	},
 
 	-- Ajustes por defecto del jugador
 	DefaultSettings = {

@@ -20,9 +20,9 @@ function Economy.give(player: Player, coins: number, xp: number, rewards: { [str
 	if not data then
 		return
 	end
-	if PlayerData.session(player).vip then
-		coins = math.floor(coins * Config.VipCoinMultiplier)
-	end
+	local session = PlayerData.session(player)
+	local multiplier = (session.coinMultiplier or 1) * (if session.vip then Config.VipCoinMultiplier else 1)
+	coins = math.floor(coins * multiplier)
 
 	local oldLevel = Config.LevelFromXP(data.xp)
 	data.coins += coins

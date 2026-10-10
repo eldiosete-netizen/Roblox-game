@@ -27,6 +27,8 @@ Juego de parkour contrarreloj: corre, desliza y salta por las paredes para conse
 - Niveles con barra de XP
 - Tienda de cosméticos: rastros, efectos de salto y de deslizamiento
 - Pase VIP: mapa Cielo, objetos exclusivos y +50% de monedas
+- Pases de monedas x2, x3, x5 y x10 que se desbloquean en orden
+- Puesto de tienda en el lobby que abre los pases de Robux
 
 **Calidad**
 - Menú de inicio, mapa tutorial con carteles y menú de ajustes
@@ -58,7 +60,7 @@ Si copias los scripts a mano en otro proyecto, desactiva **Workspace > Streaming
 ## Configurar antes de publicar
 
 1. **Guardar datos**: en Studio, **Home > Game Settings > Security > Enable Studio Access to API Services**. Sin esto el juego funciona, pero nada se guarda entre sesiones.
-2. **Pase VIP**: crea un Game Pass en el [Creator Hub](https://create.roblox.com) y pon su ID en `VipGamePassId` dentro de `src/shared/Config.luau`.
+2. **Game Pass**: crea los pases en el [Creator Hub](https://create.roblox.com) (tu juego > Monetization > Passes) y pon sus IDs en `src/shared/Config.luau`: el VIP en `VipGamePassId` y los de monedas en `CoinPasses` (x2, x3, x5 y x10). Los pases sin ID salen como "Próximamente".
 3. **Medallas**: los tiempos de medalla de cada mapa son una estimación. Juega cada mapa y ajústalos en `src/server/CourseBuilder.luau` (atributos `Bronze`, `Silver`, `Gold` y `Dev`). Lo normal es poner como medalla de desarrollador tu mejor tiempo.
 4. **Carreras en vivo**: necesitan 2 jugadores. Para probar solo en Studio, pon `LiveRace.MinPlayers = 1` en `Config.luau`.
 5. **Sonidos**: usan archivos que vienen con Roblox. Si alguno no suena, busca otro en la Creator Store (Toolbox > Audio) y pon su ID en `Sounds` dentro de `Config.luau` así: `"rbxassetid://123456789"`.
@@ -83,7 +85,8 @@ src/server/      (ServerScriptService.Server)
   Ghosts         guarda el fantasma de cada récord
   LiveRace       carreras en vivo
   Economy        monedas, XP y niveles
-  Shop           tienda, VIP y rastros
+  Shop           tienda de cosméticos y rastros
+  Passes         Game Pass: VIP y multiplicadores de monedas
 src/client/      (StarterPlayerScripts.Client)
   Main           arranque del cliente
   HUD, MapMenu, ShopMenu, SettingsMenu, StartMenu, LiveRaceUI   interfaz

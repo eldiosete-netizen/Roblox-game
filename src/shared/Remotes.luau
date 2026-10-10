@@ -17,6 +17,7 @@ local EVENTS = {
 	"DataSync", -- (snapshot)
 	"Notify", -- (text, color?)
 	"UpdateSetting", -- (key, value)
+	"PromptPass", -- (passKey) pide al servidor abrir la compra de un Game Pass
 	-- Competición
 	"GhostData", -- (mapId, encoded?)
 	"SubmitGhost", -- (mapId, encoded)
