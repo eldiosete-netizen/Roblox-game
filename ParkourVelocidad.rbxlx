@@ -77,6 +77,18 @@ local Config = {
 	ZiplineMaxSpeed = 70,
 	ZiplineGrabDistance = 3.5,
 
+	-- Fantasma (tu mejor intento)
+	GhostSampleInterval = 0.1, -- segundos entre posiciones grabadas
+	GhostMaxSamples = 3000, -- 5 minutos como máximo
+	GhostColor = Color3.fromRGB(120, 220, 255),
+
+	-- Carrera en vivo (todos a la vez)
+	LiveRace = {
+		MinPlayers = 2, -- ponlo a 1 para probar solo en Studio
+		Intermission = 15, -- segundos de espera antes de empezar
+		TimeLimit = 180, -- segundos máximos de carrera
+	},
+
 	-- Ajustes por defecto del jugador
 	DefaultSettings = {
 		shake = true, -- temblor de cámara
@@ -90,6 +102,7 @@ local Config = {
 	DataStores = {
 		Player = "PlayerData_v1",
 		TimesPrefix = "Times_v1_",
+		Ghosts = "Ghosts_v1",
 	},
 	AutosaveInterval = 120,
 }
@@ -754,6 +767,17 @@ local function buildLobby(maps: { Folder }): Folder
 		end
 	end
 
+	-- Plataforma para unirse a la carrera en vivo
+	local pad = newPart("Part", {
+		Name = "LiveRacePad",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(1, 18, 18),
+		CFrame = CFrame.new(55, y + 0.5, 0) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(170, 80, 255),
+		Material = Enum.Material.Neon,
+	}, lobby)
+	billboard(pad, "🏁 CARRERA EN VIVO", Vector2.new(16, 3), Vector3.new(0, 7, 0), Color3.fromRGB(220, 180, 255))
+
 	lobby.Parent = workspace
 	return lobby
 end
@@ -787,6 +811,116 @@ return CourseBuilder
       </Item>
       <Item class="ModuleScript" referent="8">
         <Properties>
+          <string name="Name">Ghosts</string>
+          <string name="Source"><![CDATA[-- Guarda y envía el "fantasma" (tu mejor intento grabado) de cada mapa.
+-- El cliente graba sus posiciones; el servidor solo acepta el fantasma
+-- justo después de un récord válido.
+
+local DataStoreService = game:GetService("DataStoreService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local RaceService = require(script.Parent:WaitForChild("RaceService"))
+
+local Ghosts = {}
+
+local MAX_LENGTH = Config.GhostMaxSamples * 40
+
+local store: DataStore? = nil
+pcall(function()
+	store = DataStoreService:GetDataStore(Config.DataStores.Ghosts)
+end)
+
+local cache: { [Player]: { [string]: string | false } } = {}
+local pending: { [Player]: { mapId: string, expires: number } } = {}
+
+local function key(player: Player, mapId: string): string
+	return player.UserId .. "_" .. mapId
+end
+
+local function load(player: Player, mapId: string)
+	local playerCache = cache[player]
+	if not playerCache then
+		return
+	end
+	if playerCache[mapId] == nil then
+		playerCache[mapId] = false
+		if store then
+			local ok, value = pcall(function()
+				return store:GetAsync(key(player, mapId))
+			end)
+			if ok and typeof(value) == "string" then
+				playerCache[mapId] = value
+			end
+		end
+	end
+	local ghost = playerCache[mapId]
+	if player:GetAttribute("MapId") == mapId then
+		Remotes.GhostData:FireClient(player, mapId, if ghost then ghost else nil)
+	end
+end
+
+function Ghosts.init()
+	local function onPlayerAdded(player: Player)
+		cache[player] = {}
+		-- Al entrar en un mapa, enviamos su fantasma
+		player:GetAttributeChangedSignal("MapId"):Connect(function()
+			local mapId = player:GetAttribute("MapId")
+			if typeof(mapId) == "string" then
+				task.spawn(load, player, mapId)
+			end
+		end)
+	end
+	Players.PlayerAdded:Connect(onPlayerAdded)
+	for _, player in Players:GetPlayers() do
+		onPlayerAdded(player)
+	end
+	Players.PlayerRemoving:Connect(function(player)
+		cache[player] = nil
+		pending[player] = nil
+	end)
+
+	RaceService.onFinish(function(player, map, result)
+		if result.isRecord and not map.tutorial then
+			pending[player] = { mapId = map.id, expires = os.clock() + 15 }
+		end
+	end)
+
+	Remotes.SubmitGhost.OnServerEvent:Connect(function(player, mapId, encoded)
+		local expected = pending[player]
+		if not expected or expected.mapId ~= mapId or os.clock() > expected.expires then
+			return
+		end
+		if typeof(encoded) ~= "string" or #encoded == 0 or #encoded > MAX_LENGTH then
+			return
+		end
+		pending[player] = nil
+		if cache[player] then
+			cache[player][mapId] = encoded
+		end
+		if store then
+			task.spawn(function()
+				local ok, err = pcall(function()
+					store:SetAsync(key(player, mapId), encoded, { player.UserId })
+				end)
+				if not ok then
+					warn("[Ghosts] No se pudo guardar el fantasma:", err)
+				end
+			end)
+		end
+	end)
+end
+
+return Ghosts
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
           <string name="Name">Leaderboard</string>
           <string name="Source"><![CDATA[-- Ranking global por mapa (OrderedDataStore) y carteles del lobby.
 -- Sin acceso a DataStore, el ranking funciona con los tiempos de la sesión.
@@ -802,6 +936,7 @@ local Leaderboard = {}
 export type Entry = { userId: number, name: string, seconds: number }
 
 type Board = {
+	week: number, -- semana a la que pertenecen los datos "week"
 	cached: { [string]: { [number]: number } }, -- último resultado del DataStore
 	session: { [string]: { [number]: number } }, -- tiempos de esta sesión
 	renderers: { () -> () },
@@ -810,18 +945,34 @@ type Board = {
 local boards: { [string]: Board } = {}
 local names: { [number]: string } = {}
 
-local PERIODS = { "all" }
+-- "all" = histórico, "week" = esta semana (se reinicia cada lunes, hora UTC)
+local PERIODS = { "all", "week" }
+local PERIOD_TITLES = { all = "Histórico", week = "Esta semana" }
+
+local function currentWeek(): number
+	-- El 1 de enero de 1970 fue jueves: +3 días para que la semana empiece en lunes
+	return math.floor((os.time() + 3 * 86400) / (7 * 86400))
+end
 
 local function storeName(mapId: string, period: string): string
+	if period == "week" then
+		return Config.DataStores.TimesPrefix .. mapId .. "_W" .. currentWeek()
+	end
 	return Config.DataStores.TimesPrefix .. mapId
 end
 
 local function getBoard(mapId: string): Board
 	local board = boards[mapId]
 	if board then
+		-- Nueva semana: el ranking semanal empieza de cero
+		if board.week ~= currentWeek() then
+			board.week = currentWeek()
+			board.cached.week = {}
+			board.session.week = {}
+		end
 		return board
 	end
-	board = { cached = {}, session = {}, renderers = {} }
+	board = { week = currentWeek(), cached = {}, session = {}, renderers = {} }
 	for _, period in PERIODS do
 		board.cached[period] = {}
 		board.session[period] = {}
@@ -985,10 +1136,18 @@ function Leaderboard.startBoard(part: BasePart, mapId: string, title: string, co
 		layout.Padding = UDim.new(0, 4)
 		layout.Parent = column
 
+		makeLabel(column, {
+			Size = UDim2.new(1, 0, 0, 44),
+			Font = Enum.Font.GothamBlack,
+			TextColor3 = Color3.fromRGB(170, 170, 190),
+			Text = PERIOD_TITLES[period],
+			LayoutOrder = 0,
+		})
+
 		local rows = {}
 		for rank = 1, Config.LeaderboardSize do
 			rows[rank] = makeLabel(column, {
-				Size = UDim2.new(1, 0, 0, 52),
+				Size = UDim2.new(1, 0, 0, 46),
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextColor3 = if rank <= 3 then Color3.new(1, 1, 1) else Color3.fromRGB(170, 170, 190),
 				Text = string.format("%d. ---", rank),
@@ -1026,7 +1185,219 @@ return Leaderboard
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="9">
+      <Item class="ModuleScript" referent="10">
+        <Properties>
+          <string name="Name">LiveRace</string>
+          <string name="Source"><![CDATA[-- Carreras en vivo: los jugadores en la cola corren a la vez en un mapa al azar.
+-- Fases: waiting (esperando jugadores) -> intermission (cuenta atrás) ->
+-- racing -> results -> waiting
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local Maps = require(script.Parent:WaitForChild("Maps"))
+local RaceService = require(script.Parent:WaitForChild("RaceService"))
+
+local LiveRace = {}
+
+type Finisher = { player: Player, name: string, time: number }
+
+local queue: { [Player]: boolean } = {}
+local participants: { [Player]: boolean } = {}
+local finishers: { Finisher } = {}
+local phase = "waiting"
+local currentMap: Maps.MapInfo? = nil
+local raceStart = 0
+
+local raceEndHandlers: { (Player, number?, number) -> () } = {}
+
+-- Se llama al terminar cada carrera: (jugador, puesto o nil si no terminó, participantes)
+function LiveRace.onRaceEnd(handler: (Player, number?, number) -> ())
+	table.insert(raceEndHandlers, handler)
+end
+
+local function count(set: { [Player]: boolean }): number
+	local n = 0
+	for _ in set do
+		n += 1
+	end
+	return n
+end
+
+local function publicResults(): { { name: string, time: number } }
+	local list = {}
+	for _, finisher in finishers do
+		table.insert(list, { name = finisher.name, time = finisher.time })
+	end
+	return list
+end
+
+local function broadcast(status: { [string]: any })
+	local sent: { [Player]: boolean } = {}
+	for _, set in { queue, participants } do
+		for player in set do
+			if not sent[player] then
+				sent[player] = true
+				Remotes.LiveRaceUpdate:FireClient(player, status)
+			end
+		end
+	end
+end
+
+function LiveRace.setQueued(player: Player, join: boolean): (boolean, string?)
+	if participants[player] then
+		return false, "Ya estás en una carrera en vivo"
+	end
+	if join then
+		queue[player] = true
+		Remotes.LiveRaceUpdate:FireClient(player, { phase = phase, queued = count(queue), needed = Config.LiveRace.MinPlayers })
+		return true, "Te has unido a la carrera en vivo"
+	end
+	queue[player] = nil
+	Remotes.LiveRaceUpdate:FireClient(player, { phase = "none" })
+	return true, nil
+end
+
+local function startRace()
+	local candidates = {}
+	for _, map in Maps.list() do
+		if not map.vip and not map.tutorial then
+			table.insert(candidates, map)
+		end
+	end
+	if #candidates == 0 then
+		phase = "waiting"
+		return
+	end
+	local map = candidates[math.random(#candidates)]
+	currentMap = map
+	table.clear(finishers)
+	table.clear(participants)
+
+	for player in queue do
+		if RaceService.enterMap(player, map.id, "live") then
+			participants[player] = true
+		end
+	end
+	table.clear(queue)
+
+	task.wait(0.5)
+	for player in participants do
+		RaceService.beginCountdown(player)
+	end
+	raceStart = os.clock() + Config.CountdownSeconds
+	phase = "racing"
+end
+
+local function endRace()
+	local total = count(participants)
+	local places: { [Player]: number } = {}
+	for place, finisher in finishers do
+		places[finisher.player] = place
+	end
+	broadcast({ phase = "results", map = currentMap and currentMap.name, results = publicResults() })
+
+	for player in participants do
+		for _, handler in raceEndHandlers do
+			handler(player, places[player], total)
+		end
+		RaceService.setMode(player, "solo")
+	end
+	table.clear(participants)
+	table.clear(finishers)
+	currentMap = nil
+	phase = "waiting"
+end
+
+function LiveRace.init()
+	Remotes.SetLiveRaceQueue.OnServerInvoke = function(player, join)
+		return LiveRace.setQueued(player, join == true)
+	end
+
+	-- Plataforma del lobby
+	local pad = Maps.lobby():FindFirstChild("LiveRacePad")
+	if pad and pad:IsA("BasePart") then
+		pad.Touched:Connect(function(hit)
+			local model = hit:FindFirstAncestorOfClass("Model")
+			local player = model and Players:GetPlayerFromCharacter(model)
+			if player and not queue[player] and not participants[player] then
+				local _, message = LiveRace.setQueued(player, true)
+				if message then
+					Remotes.Notify:FireClient(player, message)
+				end
+			end
+		end)
+	end
+
+	RaceService.onFinish(function(player, map, result)
+		if phase ~= "racing" or not participants[player] or not currentMap or map.id ~= currentMap.id then
+			return
+		end
+		for _, finisher in finishers do
+			if finisher.player == player then
+				return
+			end
+		end
+		table.insert(finishers, { player = player, name = player.DisplayName, time = result.time })
+		result.rewards.place = #finishers
+	end)
+
+	-- Si se va a otro mapa o al lobby, abandona la carrera
+	RaceService.onLeaveMap(function(player)
+		participants[player] = nil
+	end)
+	Players.PlayerRemoving:Connect(function(player)
+		queue[player] = nil
+		participants[player] = nil
+	end)
+
+	task.spawn(function()
+		local timer = 0
+		while true do
+			if phase == "waiting" then
+				if count(queue) >= Config.LiveRace.MinPlayers then
+					phase = "intermission"
+					timer = Config.LiveRace.Intermission
+				else
+					broadcast({ phase = "waiting", queued = count(queue), needed = Config.LiveRace.MinPlayers })
+				end
+			elseif phase == "intermission" then
+				if count(queue) < Config.LiveRace.MinPlayers then
+					phase = "waiting"
+				elseif timer <= 0 then
+					startRace()
+				else
+					broadcast({ phase = "intermission", queued = count(queue), timeLeft = timer })
+					timer -= 1
+				end
+			elseif phase == "racing" then
+				local elapsed = os.clock() - raceStart
+				local everyoneDone = count(participants) == 0 or #finishers >= count(participants)
+				if everyoneDone or elapsed > Config.LiveRace.TimeLimit then
+					endRace()
+				else
+					broadcast({
+						phase = "racing",
+						map = currentMap and currentMap.name,
+						timeLeft = math.max(0, math.ceil(Config.LiveRace.TimeLimit - elapsed)),
+						results = publicResults(),
+					})
+				end
+			end
+			task.wait(1)
+		end
+	end)
+end
+
+return LiveRace
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="11">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -1043,6 +1414,8 @@ local PlayerData = require(Server:WaitForChild("PlayerData"))
 local Maps = require(Server:WaitForChild("Maps"))
 local Leaderboard = require(Server:WaitForChild("Leaderboard"))
 local RaceService = require(Server:WaitForChild("RaceService"))
+local Ghosts = require(Server:WaitForChild("Ghosts"))
+local LiveRace = require(Server:WaitForChild("LiveRace"))
 
 Maps.init()
 
@@ -1058,6 +1431,8 @@ if boards then
 end
 
 RaceService.init()
+Ghosts.init()
+LiveRace.init()
 
 -- Tabla de jugadores (leaderstats)
 local function countMedals(data): number
@@ -1092,7 +1467,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Maps</string>
           <string name="Source"><![CDATA[-- Registro de mapas: lee Workspace/Maps (o los genera) y el lobby.
@@ -1220,7 +1595,7 @@ return Maps
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="11">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">PlayerData</string>
           <string name="Source"><![CDATA[-- Datos guardados de cada jugador (DataStore) y sincronización con su cliente.
@@ -1438,7 +1813,7 @@ return PlayerData
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="14">
         <Properties>
           <string name="Name">RaceService</string>
           <string name="Source"><![CDATA[-- Lógica de las carreras: entrar en mapas, cuenta atrás, checkpoints, meta,
@@ -1507,6 +1882,14 @@ end
 
 function RaceService.getState(player: Player): State?
 	return states[player]
+end
+
+-- Cambia entre "solo" y "live" sin mover al jugador (al acabar una carrera en vivo)
+function RaceService.setMode(player: Player, mode: string)
+	local state = states[player]
+	if state then
+		state.mode = mode
+	end
 end
 
 -- Utilidades -----------------------------------------------------------------------
@@ -1889,19 +2272,19 @@ return RaceService
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="13">
+  <Item class="StarterPlayer" referent="15">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterCharacterScripts" referent="14">
+    <Item class="StarterCharacterScripts" referent="16">
       <Properties>
         <string name="Name">StarterCharacterScripts</string>
       </Properties>
-      <Item class="Folder" referent="15">
+      <Item class="Folder" referent="17">
         <Properties>
           <string name="Name">Character</string>
         </Properties>
-        <Item class="LocalScript" referent="16">
+        <Item class="LocalScript" referent="18">
           <Properties>
             <string name="Name">Effects</string>
             <string name="Source"><![CDATA[-- Efectos visuales y de sonido del movimiento: poses, rastro, partículas,
@@ -2093,7 +2476,7 @@ character.Destroying:Connect(cleanup)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="17">
+        <Item class="LocalScript" referent="19">
           <Properties>
             <string name="Name">Movement</string>
             <string name="Source"><![CDATA[-- Movimiento de parkour: momentum al correr, deslizamiento, wall run y wall jump.
@@ -2378,15 +2761,15 @@ humanoid.Died:Connect(cleanup)
         </Item>
       </Item>
     </Item>
-    <Item class="StarterPlayerScripts" referent="18">
+    <Item class="StarterPlayerScripts" referent="20">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="19">
+      <Item class="Folder" referent="21">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="ModuleScript" referent="20">
+        <Item class="ModuleScript" referent="22">
           <Properties>
             <string name="Name">ClientState</string>
             <string name="Source"><![CDATA[-- Datos del jugador en el cliente (los envía el servidor con DataSync).
@@ -2450,7 +2833,205 @@ return ClientState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="21">
+        <Item class="ModuleScript" referent="23">
+          <Properties>
+            <string name="Name">Ghost</string>
+            <string name="Source"><![CDATA[-- Modo fantasma: graba tu carrera y, en el siguiente intento, muestra una
+-- silueta de tu mejor intento corriendo a tu lado.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local ClientState = require(script.Parent:WaitForChild("ClientState"))
+
+local player = Players.LocalPlayer
+
+local Ghost = {}
+
+type Sample = { position: Vector3, yaw: number }
+
+local ghosts: { [string]: { Sample }? } = {} -- mejor intento por mapa
+
+local recording: { Sample }? = nil
+local recordStart = 0
+
+local playback: { samples: { Sample }, model: Model, start: number }? = nil
+
+-- Formato: "x,y,z,yaw;x,y,z,yaw;..."
+local function encode(samples: { Sample }): string
+	local parts = table.create(#samples)
+	for i, sample in samples do
+		local p = sample.position
+		parts[i] = string.format("%.1f,%.1f,%.1f,%.2f", p.X, p.Y, p.Z, sample.yaw)
+	end
+	return table.concat(parts, ";")
+end
+
+local function decode(encoded: string): { Sample }
+	local samples = {}
+	for _, chunk in string.split(encoded, ";") do
+		local values = string.split(chunk, ",")
+		local x, y, z, yaw = tonumber(values[1]), tonumber(values[2]), tonumber(values[3]), tonumber(values[4])
+		if x and y and z and yaw then
+			table.insert(samples, { position = Vector3.new(x, y, z), yaw = yaw })
+		end
+	end
+	return samples
+end
+
+local function getRoot(): BasePart?
+	local character = player.Character
+	return character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+end
+
+-- Copia translúcida de tu personaje, sin scripts ni colisiones
+local function makeModel(): Model?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	local archivable = character.Archivable
+	character.Archivable = true
+	local clone = character:Clone()
+	character.Archivable = archivable
+	if not clone then
+		return nil
+	end
+
+	for _, descendant in clone:GetDescendants() do
+		if
+			descendant:IsA("LuaSourceContainer")
+			or descendant:IsA("Sound")
+			or descendant:IsA("ParticleEmitter")
+			or descendant:IsA("Trail")
+			or descendant:IsA("Constraint")
+			or descendant:IsA("BillboardGui")
+		then
+			descendant:Destroy()
+		elseif descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+			descendant.CanQuery = false
+			descendant.CanTouch = false
+			descendant.CastShadow = false
+			descendant.Color = Config.GhostColor
+			descendant.Material = Enum.Material.ForceField
+			descendant.Transparency = if descendant.Name == "HumanoidRootPart" then 1 else 0.2
+		elseif descendant:IsA("Decal") then
+			descendant.Transparency = 1
+		end
+	end
+	local humanoid = clone:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	end
+	clone.Name = "Ghost"
+	clone.Parent = workspace
+	return clone
+end
+
+local function stopPlayback()
+	if playback then
+		playback.model:Destroy()
+		playback = nil
+	end
+end
+
+local function startPlayback(mapId: string)
+	stopPlayback()
+	local samples = ghosts[mapId]
+	if not samples or #samples < 2 or not ClientState.setting("ghost") then
+		return
+	end
+	local model = makeModel()
+	if model then
+		playback = { samples = samples, model = model, start = os.clock() }
+	end
+end
+
+local function update()
+	local now = os.clock()
+
+	if recording then
+		local index = math.floor((now - recordStart) / Config.GhostSampleInterval) + 1
+		local root = getRoot()
+		-- Si bajan los FPS, repetimos la muestra para no desincronizar el tiempo
+		while root and #recording < index and #recording < Config.GhostMaxSamples do
+			local look = root.CFrame.LookVector
+			table.insert(recording, { position = root.Position, yaw = math.atan2(-look.X, -look.Z) })
+		end
+	end
+
+	if playback then
+		local samples = playback.samples
+		local t = (now - playback.start) / Config.GhostSampleInterval + 1
+		local i = math.clamp(math.floor(t), 1, #samples - 1)
+		local alpha = math.clamp(t - i, 0, 1)
+		local a, b = samples[i], samples[i + 1]
+		local position = a.position:Lerp(b.position, alpha)
+		local turn = (b.yaw - a.yaw + math.pi) % (2 * math.pi) - math.pi -- giro más corto
+		local yaw = a.yaw + turn * alpha
+		playback.model:PivotTo(CFrame.new(position) * CFrame.Angles(0, yaw, 0))
+		if t > #samples + 10 then
+			stopPlayback() -- 1 segundo después de llegar a la meta
+		end
+	end
+end
+
+function Ghost.start()
+	Remotes.GhostData.OnClientEvent:Connect(function(mapId: string, encoded: string?)
+		ghosts[mapId] = if encoded then decode(encoded) else nil
+	end)
+
+	Remotes.RaceCountdown.OnClientEvent:Connect(function()
+		recording = nil
+		stopPlayback()
+	end)
+
+	Remotes.RaceStarted.OnClientEvent:Connect(function(mapId: string)
+		recording = {}
+		recordStart = os.clock()
+		startPlayback(mapId)
+	end)
+
+	Remotes.RaceFinished.OnClientEvent:Connect(function(result)
+		local samples = recording
+		recording = nil
+		if result.isRecord and samples and #samples > 1 then
+			local root = getRoot()
+			if root then
+				local look = root.CFrame.LookVector
+				table.insert(samples, { position = root.Position, yaw = math.atan2(-look.X, -look.Z) })
+			end
+			ghosts[result.mapId] = samples
+			Remotes.SubmitGhost:FireServer(result.mapId, encode(samples))
+		end
+	end)
+
+	Remotes.RaceCancelled.OnClientEvent:Connect(function()
+		recording = nil
+		stopPlayback()
+	end)
+
+	ClientState.Changed:Connect(function()
+		if not ClientState.setting("ghost") then
+			stopPlayback()
+		end
+	end)
+
+	RunService.Heartbeat:Connect(update)
+end
+
+return Ghost
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="24">
           <Properties>
             <string name="Name">HUD</string>
             <string name="Source"><![CDATA[-- Interfaz de la carrera: cronómetro, parciales, medallas, cuenta atrás,
@@ -2805,6 +3386,9 @@ function HUD.start()
 		checkpointLabel.Text = "¡Meta!"
 
 		local parts = {}
+		if result.rewards.place then
+			table.insert(parts, string.format("Puesto %dº en la carrera en vivo", result.rewards.place))
+		end
 		if result.newMedal then
 			local medal = Config.MedalInfo(result.medal)
 			table.insert(parts, "¡Medalla de " .. medal.name .. "!")
@@ -2861,7 +3445,105 @@ return HUD
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="22">
+        <Item class="ModuleScript" referent="25">
+          <Properties>
+            <string name="Name">LiveRaceUI</string>
+            <string name="Source"><![CDATA[-- Interfaz de la carrera en vivo: banner con el estado y botón para unirse.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
+
+local HUD = require(script.Parent:WaitForChild("HUD"))
+local MapMenu = require(script.Parent:WaitForChild("MapMenu"))
+local UI = require(script.Parent:WaitForChild("UI"))
+
+local LiveRaceUI = {}
+
+local PURPLE = Color3.fromRGB(150, 70, 255)
+local PLACES = { "1º", "2º", "3º" }
+
+local banner: Frame
+local bannerLabel: TextLabel
+local joinButton: TextButton
+local inQueue = false
+
+local function setQueued(join: boolean)
+	local ok, message = Remotes.SetLiveRaceQueue:InvokeServer(join)
+	if message then
+		HUD.popup(message, if ok then PURPLE else UI.Colors.Bad)
+	end
+end
+
+local function standings(results: { { name: string, time: number } }, limit: number): string
+	local parts = {}
+	for i = 1, math.min(limit, #results) do
+		local entry = results[i]
+		table.insert(parts, string.format("%s %s %s", PLACES[i] or (i .. "º"), entry.name, Config.FormatTime(entry.time)))
+	end
+	return table.concat(parts, "   ·   ")
+end
+
+local function onUpdate(status: { [string]: any })
+	local phase = status.phase
+	inQueue = phase ~= "none" and phase ~= "results"
+	joinButton.Text = if inQueue then "🏁 Salir de la carrera" else "🏁 Carrera en vivo"
+	banner.Visible = phase ~= "none"
+
+	if phase == "waiting" then
+		bannerLabel.Text = string.format("🏁 Carrera en vivo · Esperando jugadores (%d/%d)", status.queued, status.needed)
+	elseif phase == "intermission" then
+		bannerLabel.Text = string.format("🏁 La carrera empieza en %d s · %d jugadores", status.timeLeft, status.queued)
+	elseif phase == "racing" then
+		local text = string.format("🏁 %s · Quedan %d s", status.map or "", status.timeLeft)
+		if #status.results > 0 then
+			text ..= "   ·   " .. standings(status.results, 3)
+		end
+		bannerLabel.Text = text
+	elseif phase == "results" then
+		bannerLabel.Text = "🏁 Resultados: " .. (if #status.results > 0 then standings(status.results, 3) else "nadie terminó")
+		HUD.popup("¡Carrera terminada!", PURPLE, standings(status.results, 3))
+		task.delay(8, function()
+			if not inQueue then
+				banner.Visible = false
+			end
+		end)
+	end
+end
+
+function LiveRaceUI.start()
+	banner = UI.new("Frame", {
+		Name = "LiveRace",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 6),
+		Size = UDim2.fromOffset(760, 34),
+		BackgroundColor3 = PURPLE,
+		BackgroundTransparency = 0.25,
+		Visible = false,
+	}, HUD.gui)
+	UI.corner(banner, 8)
+	UI.autoScale(banner, 0.5)
+
+	bannerLabel = UI.label(banner, {
+		Position = UDim2.fromOffset(12, 4),
+		Size = UDim2.new(1, -24, 1, -8),
+		Text = "",
+	})
+
+	joinButton = MapMenu.addHeaderButton("🏁 Carrera en vivo", 2, PURPLE, function()
+		setQueued(not inQueue)
+	end)
+
+	Remotes.LiveRaceUpdate.OnClientEvent:Connect(onUpdate)
+end
+
+return LiveRaceUI
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="26">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[-- Arranque del cliente: pone en marcha la interfaz y los sistemas locales.
@@ -2871,14 +3553,18 @@ local Client = script.Parent
 local HUD = require(Client:WaitForChild("HUD"))
 local MapMenu = require(Client:WaitForChild("MapMenu"))
 local Obstacles = require(Client:WaitForChild("Obstacles"))
+local Ghost = require(Client:WaitForChild("Ghost"))
+local LiveRaceUI = require(Client:WaitForChild("LiveRaceUI"))
 
 HUD.start()
 MapMenu.start()
+LiveRaceUI.start()
 Obstacles.start()
+Ghost.start()
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="23">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">MapMenu</string>
             <string name="Source"><![CDATA[-- Selector de mapas: tu mejor tiempo, medallas conseguidas y tiempos objetivo.
@@ -3061,7 +3747,7 @@ return MapMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="24">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">Obstacles</string>
             <string name="Source"><![CDATA[-- Obstáculos especiales (los simula cada cliente para que vayan suaves):
@@ -3346,7 +4032,7 @@ return Obstacles
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">UI</string>
             <string name="Source"><![CDATA[-- Pequeña librería para crear la interfaz con un estilo común.
@@ -3527,7 +4213,7 @@ return UI
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="26">
+  <Item class="Workspace" referent="30">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>

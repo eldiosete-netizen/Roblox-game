@@ -66,6 +66,14 @@ function RaceService.getState(player: Player): State?
 	return states[player]
 end
 
+-- Cambia entre "solo" y "live" sin mover al jugador (al acabar una carrera en vivo)
+function RaceService.setMode(player: Player, mode: string)
+	local state = states[player]
+	if state then
+		state.mode = mode
+	end
+end
+
 -- Utilidades -----------------------------------------------------------------------
 
 local function playerFromHit(hit: BasePart): Player?

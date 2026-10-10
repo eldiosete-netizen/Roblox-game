@@ -65,6 +65,18 @@ local Config = {
 	ZiplineMaxSpeed = 70,
 	ZiplineGrabDistance = 3.5,
 
+	-- Fantasma (tu mejor intento)
+	GhostSampleInterval = 0.1, -- segundos entre posiciones grabadas
+	GhostMaxSamples = 3000, -- 5 minutos como máximo
+	GhostColor = Color3.fromRGB(120, 220, 255),
+
+	-- Carrera en vivo (todos a la vez)
+	LiveRace = {
+		MinPlayers = 2, -- ponlo a 1 para probar solo en Studio
+		Intermission = 15, -- segundos de espera antes de empezar
+		TimeLimit = 180, -- segundos máximos de carrera
+	},
+
 	-- Ajustes por defecto del jugador
 	DefaultSettings = {
 		shake = true, -- temblor de cámara
@@ -78,6 +90,7 @@ local Config = {
 	DataStores = {
 		Player = "PlayerData_v1",
 		TimesPrefix = "Times_v1_",
+		Ghosts = "Ghosts_v1",
 	},
 	AutosaveInterval = 120,
 }

@@ -11,6 +11,8 @@ local PlayerData = require(Server:WaitForChild("PlayerData"))
 local Maps = require(Server:WaitForChild("Maps"))
 local Leaderboard = require(Server:WaitForChild("Leaderboard"))
 local RaceService = require(Server:WaitForChild("RaceService"))
+local Ghosts = require(Server:WaitForChild("Ghosts"))
+local LiveRace = require(Server:WaitForChild("LiveRace"))
 
 Maps.init()
 
@@ -26,6 +28,8 @@ if boards then
 end
 
 RaceService.init()
+Ghosts.init()
+LiveRace.init()
 
 -- Tabla de jugadores (leaderstats)
 local function countMedals(data): number

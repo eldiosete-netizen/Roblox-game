@@ -12,6 +12,7 @@ local Leaderboard = {}
 export type Entry = { userId: number, name: string, seconds: number }
 
 type Board = {
+	week: number, -- semana a la que pertenecen los datos "week"
 	cached: { [string]: { [number]: number } }, -- último resultado del DataStore
 	session: { [string]: { [number]: number } }, -- tiempos de esta sesión
 	renderers: { () -> () },
@@ -20,18 +21,34 @@ type Board = {
 local boards: { [string]: Board } = {}
 local names: { [number]: string } = {}
 
-local PERIODS = { "all" }
+-- "all" = histórico, "week" = esta semana (se reinicia cada lunes, hora UTC)
+local PERIODS = { "all", "week" }
+local PERIOD_TITLES = { all = "Histórico", week = "Esta semana" }
+
+local function currentWeek(): number
+	-- El 1 de enero de 1970 fue jueves: +3 días para que la semana empiece en lunes
+	return math.floor((os.time() + 3 * 86400) / (7 * 86400))
+end
 
 local function storeName(mapId: string, period: string): string
+	if period == "week" then
+		return Config.DataStores.TimesPrefix .. mapId .. "_W" .. currentWeek()
+	end
 	return Config.DataStores.TimesPrefix .. mapId
 end
 
 local function getBoard(mapId: string): Board
 	local board = boards[mapId]
 	if board then
+		-- Nueva semana: el ranking semanal empieza de cero
+		if board.week ~= currentWeek() then
+			board.week = currentWeek()
+			board.cached.week = {}
+			board.session.week = {}
+		end
 		return board
 	end
-	board = { cached = {}, session = {}, renderers = {} }
+	board = { week = currentWeek(), cached = {}, session = {}, renderers = {} }
 	for _, period in PERIODS do
 		board.cached[period] = {}
 		board.session[period] = {}
@@ -195,10 +212,18 @@ function Leaderboard.startBoard(part: BasePart, mapId: string, title: string, co
 		layout.Padding = UDim.new(0, 4)
 		layout.Parent = column
 
+		makeLabel(column, {
+			Size = UDim2.new(1, 0, 0, 44),
+			Font = Enum.Font.GothamBlack,
+			TextColor3 = Color3.fromRGB(170, 170, 190),
+			Text = PERIOD_TITLES[period],
+			LayoutOrder = 0,
+		})
+
 		local rows = {}
 		for rank = 1, Config.LeaderboardSize do
 			rows[rank] = makeLabel(column, {
-				Size = UDim2.new(1, 0, 0, 52),
+				Size = UDim2.new(1, 0, 0, 46),
 				TextXAlignment = Enum.TextXAlignment.Left,
 				TextColor3 = if rank <= 3 then Color3.new(1, 1, 1) else Color3.fromRGB(170, 170, 190),
 				Text = string.format("%d. ---", rank),

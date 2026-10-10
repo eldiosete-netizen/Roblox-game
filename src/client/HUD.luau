@@ -350,6 +350,9 @@ function HUD.start()
 		checkpointLabel.Text = "¡Meta!"
 
 		local parts = {}
+		if result.rewards.place then
+			table.insert(parts, string.format("Puesto %dº en la carrera en vivo", result.rewards.place))
+		end
 		if result.newMedal then
 			local medal = Config.MedalInfo(result.medal)
 			table.insert(parts, "¡Medalla de " .. medal.name .. "!")

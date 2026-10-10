@@ -503,6 +503,17 @@ local function buildLobby(maps: { Folder }): Folder
 		end
 	end
 
+	-- Plataforma para unirse a la carrera en vivo
+	local pad = newPart("Part", {
+		Name = "LiveRacePad",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(1, 18, 18),
+		CFrame = CFrame.new(55, y + 0.5, 0) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(170, 80, 255),
+		Material = Enum.Material.Neon,
+	}, lobby)
+	billboard(pad, "🏁 CARRERA EN VIVO", Vector2.new(16, 3), Vector3.new(0, 7, 0), Color3.fromRGB(220, 180, 255))
+
 	lobby.Parent = workspace
 	return lobby
 end
