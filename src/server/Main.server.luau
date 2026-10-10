@@ -4,7 +4,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
-require(Shared:WaitForChild("Remotes")) -- crea los RemoteEvents antes que nada
+local Remotes = require(Shared:WaitForChild("Remotes")) -- crea los RemoteEvents antes que nada
 
 local Server = script.Parent
 local PlayerData = require(Server:WaitForChild("PlayerData"))
@@ -32,6 +32,18 @@ if boards then
 end
 
 RaceService.init()
+
+-- Rankings para el menú del cliente (usa la caché, no gasta peticiones extra)
+Remotes.GetLeaderboard.OnServerInvoke = function(_player, mapId)
+	local map = typeof(mapId) == "string" and Maps.get(mapId)
+	if not map or map.tutorial then
+		return nil
+	end
+	return {
+		all = Leaderboard.getTop(map.id, "all", Config.LeaderboardSize),
+		week = Leaderboard.getTop(map.id, "week", Config.LeaderboardSize),
+	}
+end
 Ghosts.init()
 LiveRace.init()
 Economy.init()

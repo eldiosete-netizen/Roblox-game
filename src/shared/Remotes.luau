@@ -28,6 +28,7 @@ local FUNCTIONS = {
 	"SetLiveRaceQueue", -- (join) -> ok, message
 	"Purchase", -- (itemId) -> ok, message
 	"Equip", -- (itemId) -> ok, message
+	"GetLeaderboard", -- (mapId) -> { all = entries, week = entries }
 }
 
 local Remotes = {}
