@@ -679,7 +679,7 @@ local function buildRankingWall(lobby: Folder, boards: Folder, maps: { Folder },
 		end
 	end
 
-	local along = facing:Cross(Vector3.yAxis) -- dirección de la fila
+	local along = Vector3.yAxis:Cross(facing) -- de izquierda a derecha vista de frente
 	local boardSize = Vector3.new(18, 14, 1)
 	local spacing = boardSize.X + 4
 	local rowLength = #ranked * spacing
@@ -853,25 +853,8 @@ local function buildLobby(maps: { Folder }): Folder
 		buildPortal(portals, map, Vector3.new(x, y, -45))
 	end
 
-	-- Rankings a la izquierda del spawn, mirando hacia el centro del lobby
-	buildRankingWall(lobby, boards, maps, Vector3.new(-45, y, 8), Vector3.new(1, 0, 0))
-
-	-- Carteles de dirección junto al spawn
-	for _, sign in {
-		{ x = -12, text = "← 🏆 Rankings", color = Color3.fromRGB(255, 205, 40) },
-		{ x = 12, text = "Carrera en vivo →", color = Color3.fromRGB(220, 180, 255) },
-	} do
-		local anchor = newPart("Part", {
-			Name = "DirectionSign",
-			Size = Vector3.new(1, 1, 1),
-			Position = Vector3.new(sign.x, y + 6, 20),
-			Transparency = 1,
-			CanCollide = false,
-			CanQuery = false,
-			CanTouch = false,
-		}, lobby)
-		billboard(anchor, sign.text, Vector2.new(12, 2.5), Vector3.zero, sign.color)
-	end
+	-- Rankings detrás del spawn (no tapan los portales ni la carrera en vivo)
+	buildRankingWall(lobby, boards, maps, Vector3.new(0, y, 58), Vector3.new(0, 0, -1))
 
 	buildLiveRacePad(lobby, Vector3.new(58, y, 0), Vector3.new(0, y, 20))
 
