@@ -507,6 +507,242 @@ CourseBuilder.Definitions = {
 
 -- Lobby ------------------------------------------------------------------------------
 
+local DARK_METAL = Color3.fromRGB(35, 38, 52)
+
+-- Partículas brillantes que flotan (portales y carrera en vivo)
+local function sparkles(parent: BasePart, color: Color3, direction: Enum.NormalId, rate: number)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(color)
+	emitter.LightEmission = 1
+	emitter.EmissionDirection = direction
+	emitter.Rate = rate
+	emitter.Lifetime = NumberRange.new(1.5, 2.5)
+	emitter.Speed = NumberRange.new(2, 5)
+	emitter.SpreadAngle = Vector2.new(25, 25)
+	emitter.Size = NumberSequence.new(0.5, 0)
+	emitter.Transparency = NumberSequence.new(0.2, 1)
+	emitter.Parent = parent
+end
+
+-- Cartel con fondo oscuro y borde de color en la cara frontal de una Part
+local function namePlate(part: BasePart, text: string, color: Color3)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 50
+	gui.Parent = part
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = Color3.fromRGB(18, 20, 30)
+	frame.Parent = gui
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 18)
+	corner.Parent = frame
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = color
+	stroke.Thickness = 6
+	stroke.Parent = frame
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -40, 1, -20)
+	label.Position = UDim2.fromOffset(20, 10)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Text = text
+	label.Parent = frame
+end
+
+-- Portal con arco de neón, superficie de energía, luz, partículas y cartel con el nombre
+local function buildPortal(portals: Folder, boards: Folder, map: Folder, base: Vector3)
+	local color = map:GetAttribute("Color") or Color3.new(1, 1, 1)
+	local isVip = map:GetAttribute("Vip") == true
+	local isTutorial = map:GetAttribute("Tutorial") == true
+	local trim = if isVip then Color3.fromRGB(255, 205, 40) else color
+	local facing = Vector3.new(0, 0, 1) -- los portales miran hacia el spawn
+
+	local radius = 6.5 -- distancia del centro a cada columna
+	local pillarHeight = 13
+	local archCenter = base + Vector3.new(0, pillarHeight, 0)
+
+	-- Escalón de la base
+	newPart("Part", {
+		Name = "Step",
+		Size = Vector3.new(radius * 2 + 6, 0.4, 7),
+		Position = base + Vector3.new(0, 0.2, 0),
+		Color = DARK_METAL,
+		Material = Enum.Material.Metal,
+	}, portals)
+	newPart("Part", {
+		Name = "StepGlow",
+		Size = Vector3.new(radius * 2 + 6, 0.1, 0.4),
+		Position = base + Vector3.new(0, 0.45, 3.3),
+		Color = trim,
+		Material = Enum.Material.Neon,
+	}, portals)
+
+	-- Columnas oscuras con una franja de neón delante
+	for _, side in { -1, 1 } do
+		newPart("Part", {
+			Name = "Pillar",
+			Size = Vector3.new(2.5, pillarHeight, 2.5),
+			Position = base + Vector3.new(side * radius, pillarHeight / 2 + 0.4, 0),
+			Color = DARK_METAL,
+			Material = Enum.Material.Metal,
+		}, portals)
+		newPart("Part", {
+			Name = "PillarGlow",
+			Size = Vector3.new(0.5, pillarHeight - 1, 0.2),
+			Position = base + Vector3.new(side * radius, pillarHeight / 2 + 0.4, 1.3),
+			Color = trim,
+			Material = Enum.Material.Neon,
+		}, portals)
+	end
+
+	-- Arco de neón (semicírculo hecho con segmentos)
+	local segments = 12
+	local segmentLength = 2 * radius * math.sin(math.pi / (2 * segments)) * 1.25
+	for k = 0, segments - 1 do
+		local angle = (k + 0.5) / segments * math.pi
+		local position = archCenter + Vector3.new(radius * math.cos(angle), radius * math.sin(angle) + 0.4, 0)
+		newPart("Part", {
+			Name = "Arch",
+			Size = Vector3.new(2.5, segmentLength, 2.5),
+			CFrame = CFrame.new(position) * CFrame.Angles(0, 0, angle),
+			Color = trim,
+			Material = Enum.Material.Neon,
+		}, portals)
+	end
+
+	-- Superficie de energía (rectángulo + semicírculo). Solo "Portal" detecta al jugador.
+	local inner = radius * 2 - 2.5
+	local portal = newPart("Part", {
+		Name = "Portal",
+		Size = Vector3.new(inner, pillarHeight, 0.4),
+		Position = base + Vector3.new(0, pillarHeight / 2 + 0.4, 0),
+		Color = color,
+		Material = Enum.Material.ForceField,
+		Transparency = 0.15,
+		CanCollide = false,
+	}, portals)
+	portal:SetAttribute("MapId", map.Name)
+	newPart("Part", {
+		Name = "PortalTop",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.4, inner, inner),
+		CFrame = CFrame.new(archCenter + Vector3.new(0, 0.4, 0)) * CFrame.Angles(0, math.rad(90), 0),
+		Color = color,
+		Material = Enum.Material.ForceField,
+		Transparency = 0.15,
+		CanCollide = false,
+		CanTouch = false,
+		CanQuery = false,
+	}, portals)
+
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 18
+	light.Brightness = 2
+	light.Parent = portal
+	sparkles(portal, color, Enum.NormalId.Front, 6)
+
+	-- Cartel con el nombre, encima del arco
+	local name = map:GetAttribute("DisplayName") or map.Name
+	local plateCenter = archCenter + Vector3.new(0, radius + 3.4, 0)
+	local plate = newPart("Part", {
+		Name = "NamePlate",
+		Size = Vector3.new(13, 3, 0.5),
+		CFrame = CFrame.lookAt(plateCenter, plateCenter + facing),
+		Color = DARK_METAL,
+	}, portals)
+	namePlate(
+		plate,
+		if isVip then "⭐ " .. name .. " · VIP" elseif isTutorial then "📘 " .. name else name,
+		trim
+	)
+	if isTutorial then
+		billboard(plate, "¡Empieza aquí!", Vector2.new(10, 2), Vector3.new(0, 2.6, 0), Color3.fromRGB(0, 230, 120))
+	end
+
+	-- Ranking del mapa encima del cartel
+	if not isTutorial then
+		local boardCenter = plateCenter + Vector3.new(0, 10.5, -0.5)
+		local board = newPart("Part", {
+			Name = "Board",
+			Size = Vector3.new(18, 16, 1),
+			CFrame = CFrame.lookAt(boardCenter, boardCenter + facing),
+			Color = Color3.fromRGB(20, 20, 30),
+		}, boards)
+		board:SetAttribute("MapId", map.Name)
+	end
+end
+
+-- Plataforma de la carrera en vivo: anillo de neón, partículas y cartel alto en un poste
+local function buildLiveRacePad(lobby: Folder, center: Vector3, viewer: Vector3)
+	local purple = Color3.fromRGB(170, 80, 255)
+	local flat = CFrame.Angles(0, 0, math.rad(90)) -- cilindros tumbados (eje vertical)
+
+	newPart("Part", {
+		Name = "LiveRaceRing",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.5, 22, 22),
+		CFrame = CFrame.new(center + Vector3.new(0, 0.25, 0)) * flat,
+		Color = purple,
+		Material = Enum.Material.Neon,
+	}, lobby)
+	newPart("Part", {
+		Name = "LiveRaceBase",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.6, 19.5, 19.5),
+		CFrame = CFrame.new(center + Vector3.new(0, 0.3, 0)) * flat,
+		Color = Color3.fromRGB(28, 20, 42),
+	}, lobby)
+	local pad = newPart("Part", {
+		Name = "LiveRacePad",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.7, 15, 15),
+		CFrame = CFrame.new(center + Vector3.new(0, 0.35, 0)) * flat,
+		Color = Color3.fromRGB(120, 50, 200),
+		Material = Enum.Material.Neon,
+	}, lobby)
+	local light = Instance.new("PointLight")
+	light.Color = purple
+	light.Range = 20
+	light.Brightness = 2
+	light.Parent = pad
+	-- Con el cilindro tumbado, su cara "Right" mira hacia arriba
+	sparkles(pad, Color3.fromRGB(220, 180, 255), Enum.NormalId.Right, 15)
+
+	-- Poste detrás del círculo (visto desde el spawn) con el cartel bien alto
+	local away = Vector3.new(center.X - viewer.X, 0, center.Z - viewer.Z).Unit
+	local postBase = center + away * 13
+	newPart("Part", {
+		Name = "LiveRacePost",
+		Size = Vector3.new(1.5, 18, 1.5),
+		Position = postBase + Vector3.new(0, 9, 0),
+		Color = DARK_METAL,
+		Material = Enum.Material.Metal,
+	}, lobby)
+	local signCenter = postBase + Vector3.new(0, 19, 0) - away * 0.8
+	local sign = newPart("Part", {
+		Name = "LiveRaceSign",
+		Size = Vector3.new(22, 5, 0.6),
+		CFrame = CFrame.lookAt(signCenter, signCenter - away),
+		Color = DARK_METAL,
+	}, lobby)
+	namePlate(sign, "🏁 CARRERA EN VIVO", purple)
+	billboard(
+		sign,
+		"Pisa el círculo para unirte",
+		Vector2.new(14, 1.8),
+		Vector3.new(0, -3.8, 0),
+		Color3.fromRGB(220, 180, 255)
+	)
+end
+
 local function buildLobby(maps: { Folder }): Folder
 	local lobby = Instance.new("Folder")
 	lobby.Name = "Lobby"
@@ -540,70 +776,13 @@ local function buildLobby(maps: { Folder }): Folder
 		return (a:GetAttribute("Order") or 0) < (b:GetAttribute("Order") or 0)
 	end)
 
-	local spacing = 26
+	local spacing = 28
 	for i, map in maps do
 		local x = (i - (#maps + 1) / 2) * spacing
-		local z = -45
-		local color = map:GetAttribute("Color") or Color3.new(1, 1, 1)
-		local isVip = map:GetAttribute("Vip") == true
-
-		-- Marco del portal
-		for _, side in { -1, 1 } do
-			newPart("Part", {
-				Name = "Pillar",
-				Size = Vector3.new(2, 14, 2),
-				Position = Vector3.new(x + side * 7, y + 7, z),
-				Color = color,
-				Material = Enum.Material.Neon,
-			}, portals)
-		end
-		local top = newPart("Part", {
-			Name = "Top",
-			Size = Vector3.new(16, 2, 2),
-			Position = Vector3.new(x, y + 15, z),
-			Color = color,
-			Material = Enum.Material.Neon,
-		}, portals)
-		billboard(
-			top,
-			(if isVip then "⭐ VIP · " else "") .. (map:GetAttribute("DisplayName") or map.Name),
-			Vector2.new(14, 3),
-			Vector3.new(0, 3, 0)
-		)
-
-		local portal = newPart("Part", {
-			Name = "Portal",
-			Size = Vector3.new(12, 14, 1),
-			Position = Vector3.new(x, y + 7, z),
-			Color = color,
-			Material = Enum.Material.ForceField,
-			Transparency = 0.3,
-			CanCollide = false,
-		}, portals)
-		portal:SetAttribute("MapId", map.Name)
-
-		-- Ranking del mapa encima del portal
-		if not map:GetAttribute("Tutorial") then
-			local board = newPart("Part", {
-				Name = "Board",
-				Size = Vector3.new(18, 16, 1),
-				CFrame = CFrame.lookAt(Vector3.new(x, y + 28, z - 1), Vector3.new(x, y + 28, z + 10)),
-				Color = Color3.fromRGB(20, 20, 30),
-			}, boards)
-			board:SetAttribute("MapId", map.Name)
-		end
+		buildPortal(portals, boards, map, Vector3.new(x, y, -45))
 	end
 
-	-- Plataforma para unirse a la carrera en vivo
-	local pad = newPart("Part", {
-		Name = "LiveRacePad",
-		Shape = Enum.PartType.Cylinder,
-		Size = Vector3.new(1, 18, 18),
-		CFrame = CFrame.new(55, y + 0.5, 0) * CFrame.Angles(0, 0, math.rad(90)),
-		Color = Color3.fromRGB(170, 80, 255),
-		Material = Enum.Material.Neon,
-	}, lobby)
-	billboard(pad, "🏁 CARRERA EN VIVO", Vector2.new(16, 3), Vector3.new(0, 7, 0), Color3.fromRGB(220, 180, 255))
+	buildLiveRacePad(lobby, Vector3.new(58, y, 0), Vector3.new(0, y, 20))
 
 	lobby.Parent = workspace
 	return lobby
