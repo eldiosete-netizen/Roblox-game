@@ -557,7 +557,7 @@ local function namePlate(part: BasePart, text: string, color: Color3)
 end
 
 -- Portal con arco de neón, superficie de energía, luz, partículas y cartel con el nombre
-local function buildPortal(portals: Folder, boards: Folder, map: Folder, base: Vector3)
+local function buildPortal(portals: Folder, map: Folder, base: Vector3)
 	local color = map:GetAttribute("Color") or Color3.new(1, 1, 1)
 	local isVip = map:GetAttribute("Vip") == true
 	local isTutorial = map:GetAttribute("Tutorial") == true
@@ -667,16 +667,87 @@ local function buildPortal(portals: Folder, boards: Folder, map: Folder, base: V
 		billboard(plate, "¡Empieza aquí!", Vector2.new(10, 2), Vector3.new(0, 2.6, 0), Color3.fromRGB(0, 230, 120))
 	end
 
-	-- Ranking del mapa encima del cartel
-	if not isTutorial then
-		local boardCenter = plateCenter + Vector3.new(0, 10.5, -0.5)
+end
+
+-- Zona de rankings: una fila de carteles a la altura de los ojos.
+-- "origin" es el centro de la fila en el suelo y "facing" hacia dónde miran.
+local function buildRankingWall(lobby: Folder, boards: Folder, maps: { Folder }, origin: Vector3, facing: Vector3)
+	local ranked = {}
+	for _, map in maps do
+		if not map:GetAttribute("Tutorial") then
+			table.insert(ranked, map)
+		end
+	end
+
+	local along = facing:Cross(Vector3.yAxis) -- dirección de la fila
+	local boardSize = Vector3.new(18, 14, 1)
+	local spacing = boardSize.X + 4
+	local rowLength = #ranked * spacing
+
+	-- Suelo de la zona y muro trasero
+	newPart("Part", {
+		Name = "RankingFloor",
+		Size = Vector3.new(rowLength + 6, 0.2, 16),
+		CFrame = CFrame.lookAt(origin + facing * 6 + Vector3.new(0, 0.1, 0), origin + facing * 7 + Vector3.new(0, 0.1, 0)),
+		Color = Color3.fromRGB(30, 32, 46),
+	}, lobby)
+	newPart("Part", {
+		Name = "RankingWall",
+		Size = Vector3.new(rowLength + 6, 22, 2),
+		CFrame = CFrame.lookAt(origin - facing * 1.5 + Vector3.new(0, 11, 0), origin + facing + Vector3.new(0, 11, 0)),
+		Color = DARK_METAL,
+		Material = Enum.Material.Metal,
+	}, lobby)
+
+	-- Título de la zona
+	local titleCenter = origin + Vector3.new(0, 19, 0) + facing * 0.2
+	local title = newPart("Part", {
+		Name = "RankingTitle",
+		Size = Vector3.new(26, 4, 0.5),
+		CFrame = CFrame.lookAt(titleCenter, titleCenter + facing),
+		Color = DARK_METAL,
+	}, lobby)
+	namePlate(title, "🏆 RANKINGS", Color3.fromRGB(255, 205, 40))
+
+	for i, map in ranked do
+		local color = map:GetAttribute("Color") or Color3.new(1, 1, 1)
+		local offset = (i - (#ranked + 1) / 2) * spacing
+		local center = origin + along * offset + Vector3.new(0, boardSize.Y / 2 + 1.5, 0) + facing * 0.5
+
 		local board = newPart("Part", {
 			Name = "Board",
-			Size = Vector3.new(18, 16, 1),
-			CFrame = CFrame.lookAt(boardCenter, boardCenter + facing),
+			Size = boardSize,
+			CFrame = CFrame.lookAt(center, center + facing),
 			Color = Color3.fromRGB(20, 20, 30),
 		}, boards)
 		board:SetAttribute("MapId", map.Name)
+
+		-- Marco de neón del color del mapa
+		local frameCenter = center - facing * 0.1
+		local frame = CFrame.lookAt(frameCenter, frameCenter + facing)
+		local w, h = boardSize.X / 2 + 0.3, boardSize.Y / 2 + 0.3
+		for _, piece in {
+			{ CFrame.new(0, h, 0), Vector3.new(boardSize.X + 1.2, 0.6, 0.6) },
+			{ CFrame.new(0, -h, 0), Vector3.new(boardSize.X + 1.2, 0.6, 0.6) },
+			{ CFrame.new(w, 0, 0), Vector3.new(0.6, boardSize.Y + 1.2, 0.6) },
+			{ CFrame.new(-w, 0, 0), Vector3.new(0.6, boardSize.Y + 1.2, 0.6) },
+		} do
+			newPart("Part", {
+				Name = "BoardFrame",
+				Size = piece[2],
+				CFrame = frame * piece[1],
+				Color = color,
+				Material = Enum.Material.Neon,
+			}, lobby)
+		end
+
+		-- Luz suave delante del cartel para que se lea bien
+		local light = Instance.new("SurfaceLight")
+		light.Face = Enum.NormalId.Front
+		light.Color = color
+		light.Range = 10
+		light.Brightness = 0.6
+		light.Parent = board
 	end
 end
 
@@ -779,8 +850,11 @@ local function buildLobby(maps: { Folder }): Folder
 	local spacing = 28
 	for i, map in maps do
 		local x = (i - (#maps + 1) / 2) * spacing
-		buildPortal(portals, boards, map, Vector3.new(x, y, -45))
+		buildPortal(portals, map, Vector3.new(x, y, -45))
 	end
+
+	-- Rankings a la izquierda del spawn, mirando hacia el centro del lobby
+	buildRankingWall(lobby, boards, maps, Vector3.new(-74, y, -5), Vector3.new(1, 0, 0))
 
 	buildLiveRacePad(lobby, Vector3.new(58, y, 0), Vector3.new(0, y, 20))
 
