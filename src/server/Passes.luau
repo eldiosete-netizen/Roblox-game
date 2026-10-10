@@ -139,7 +139,7 @@ function Passes.init()
 		else
 			Remotes.Notify:FireClient(
 				player,
-				string.format("🪙 ¡Monedas x%d activado! Gracias por tu apoyo", session.coinMultiplier),
+				string.format("💰 ¡Monedas x%d activado! Gracias por tu apoyo", session.coinMultiplier),
 				GOLD
 			)
 		end

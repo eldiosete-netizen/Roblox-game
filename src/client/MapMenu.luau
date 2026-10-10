@@ -144,7 +144,7 @@ function MapMenu.refresh()
 		end
 		if locked then
 			-- Primer clic: pide confirmación; segundo clic: compra el nivel
-			local lockedText = string.format("🔒 %d 🪙", price)
+			local lockedText = string.format("🔒 %d", price)
 			playButton.Text = lockedText
 			playButton.BackgroundColor3 = UI.Colors.Gold
 			playButton.TextColor3 = UI.Colors.Background

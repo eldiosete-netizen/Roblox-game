@@ -105,7 +105,7 @@ return Catalog
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "3.0",
+	Version = "3.1",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -3281,7 +3281,7 @@ function Passes.init()
 		else
 			Remotes.Notify:FireClient(
 				player,
-				string.format("🪙 ¡Monedas x%d activado! Gracias por tu apoyo", session.coinMultiplier),
+				string.format("💰 ¡Monedas x%d activado! Gracias por tu apoyo", session.coinMultiplier),
 				GOLD
 			)
 		end
@@ -5067,7 +5067,7 @@ local function updateStats()
 	levelLabel.Text = string.format("Nivel %d", level) .. (if data.vip then "  ⭐ VIP" else "")
 	xpFill.Size = UDim2.fromScale(math.clamp(current / needed, 0, 1), 1)
 	local multiplier = (data.coinMultiplier or 1) * (if data.vip then Config.VipCoinMultiplier else 1)
-	coinsLabel.Text = string.format("🪙 %d", data.coins)
+	coinsLabel.Text = string.format("%d", data.coins)
 		.. (if multiplier > 1 then string.format("   (x%s)", string.format("%g", multiplier)) else "")
 end
 
@@ -5285,12 +5285,16 @@ local function build()
 		BackgroundColor3 = UI.Colors.Good,
 	}, xpBar)
 	UI.corner(xpFill, 5)
+	UI.coinIcon(stats, {
+		Position = UDim2.fromOffset(12, 54),
+		Size = UDim2.fromOffset(22, 22),
+	})
 	coinsLabel = UI.label(stats, {
-		Position = UDim2.fromOffset(12, 52),
-		Size = UDim2.new(1, -24, 0, 26),
+		Position = UDim2.fromOffset(42, 52),
+		Size = UDim2.new(1, -54, 0, 26),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = UI.Colors.Gold,
-		Text = "🪙 0",
+		Text = "0",
 	})
 
 	UI.label(gui, {
@@ -6006,7 +6010,7 @@ function MapMenu.refresh()
 		end
 		if locked then
 			-- Primer clic: pide confirmación; segundo clic: compra el nivel
-			local lockedText = string.format("🔒 %d 🪙", price)
+			local lockedText = string.format("🔒 %d", price)
 			playButton.Text = lockedText
 			playButton.BackgroundColor3 = UI.Colors.Gold
 			playButton.TextColor3 = UI.Colors.Background
@@ -7021,11 +7025,24 @@ local function renderCosmetics(kind: string, order: number)
 			Size = UDim2.new(1, -16, 0, 34),
 			Text = (if item.vip then "⭐ " else "") .. item.name,
 		}, 3)
-		cartoonText(frame, {
-			Position = UDim2.fromOffset(8, 50),
-			Size = UDim2.new(1, -16, 0, 40),
-			Text = if item.vip then "VIP" elseif item.price == 0 then "Gratis" else "🪙 " .. item.price,
-		})
+		if item.vip or item.price == 0 then
+			cartoonText(frame, {
+				Position = UDim2.fromOffset(8, 50),
+				Size = UDim2.new(1, -16, 0, 40),
+				Text = if item.vip then "VIP" else "Gratis",
+			})
+		else
+			UI.coinIcon(frame, {
+				Position = UDim2.fromOffset(28, 56),
+				Size = UDim2.fromOffset(30, 30),
+			})
+			cartoonText(frame, {
+				Position = UDim2.fromOffset(64, 50),
+				Size = UDim2.new(1, -84, 0, 40),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Text = tostring(item.price),
+			})
+		end
 
 		local text, color = "", COLORS.Disabled
 		if state == "equipped" then
@@ -7037,7 +7054,7 @@ local function renderCosmetics(kind: string, order: number)
 		elseif state == "buy" then
 			text, color = "Comprar", COLORS.Price
 		else
-			text = "🪙 " .. item.price
+			text = "🔒 Faltan monedas"
 		end
 		local button = cartoonButton(frame, text, color, {
 			Position = UDim2.new(0, 10, 1, -52),
@@ -7388,6 +7405,38 @@ function UI.button(parent: Instance, text: string, color: Color3?, props: { [str
 	UI.new("UITextSizeConstraint", { MaxTextSize = 28 }, button)
 	button.Parent = parent
 	return button
+end
+
+-- Moneda del juego dibujada con piezas de interfaz (Roblox no tiene el emoji 🪙)
+function UI.coinIcon(parent: Instance, props: { [string]: any }): Frame
+	local coin = UI.new("Frame", { BackgroundColor3 = Color3.new(1, 1, 1) }, nil)
+	for key, value in props do
+		(coin :: any)[key] = value
+	end
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, coin)
+	UI.new("UIStroke", { Thickness = 2, Color = Color3.fromRGB(140, 80, 0) }, coin)
+	UI.new("UIGradient", {
+		Color = ColorSequence.new(Color3.fromRGB(255, 240, 150), Color3.fromRGB(240, 160, 0)),
+		Rotation = 90,
+	}, coin)
+	local inner = UI.new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.6, 0.6),
+		BackgroundTransparency = 1,
+	}, coin)
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, inner)
+	UI.new("UIStroke", { Thickness = 1.5, Color = Color3.fromRGB(200, 120, 0) }, inner)
+	-- Brillo
+	local glint = UI.new("Frame", {
+		Position = UDim2.fromScale(0.22, 0.18),
+		Size = UDim2.fromScale(0.22, 0.22),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.25,
+	}, coin)
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, glint)
+	coin.Parent = parent
+	return coin
 end
 
 -- Escala un elemento según el tamaño de la pantalla (móviles más pequeño)

@@ -373,11 +373,24 @@ local function renderCosmetics(kind: string, order: number)
 			Size = UDim2.new(1, -16, 0, 34),
 			Text = (if item.vip then "⭐ " else "") .. item.name,
 		}, 3)
-		cartoonText(frame, {
-			Position = UDim2.fromOffset(8, 50),
-			Size = UDim2.new(1, -16, 0, 40),
-			Text = if item.vip then "VIP" elseif item.price == 0 then "Gratis" else "🪙 " .. item.price,
-		})
+		if item.vip or item.price == 0 then
+			cartoonText(frame, {
+				Position = UDim2.fromOffset(8, 50),
+				Size = UDim2.new(1, -16, 0, 40),
+				Text = if item.vip then "VIP" else "Gratis",
+			})
+		else
+			UI.coinIcon(frame, {
+				Position = UDim2.fromOffset(28, 56),
+				Size = UDim2.fromOffset(30, 30),
+			})
+			cartoonText(frame, {
+				Position = UDim2.fromOffset(64, 50),
+				Size = UDim2.new(1, -84, 0, 40),
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Text = tostring(item.price),
+			})
+		end
 
 		local text, color = "", COLORS.Disabled
 		if state == "equipped" then
@@ -389,7 +402,7 @@ local function renderCosmetics(kind: string, order: number)
 		elseif state == "buy" then
 			text, color = "Comprar", COLORS.Price
 		else
-			text = "🪙 " .. item.price
+			text = "🔒 Faltan monedas"
 		end
 		local button = cartoonButton(frame, text, color, {
 			Position = UDim2.new(0, 10, 1, -52),

@@ -89,7 +89,7 @@ local function updateStats()
 	levelLabel.Text = string.format("Nivel %d", level) .. (if data.vip then "  ⭐ VIP" else "")
 	xpFill.Size = UDim2.fromScale(math.clamp(current / needed, 0, 1), 1)
 	local multiplier = (data.coinMultiplier or 1) * (if data.vip then Config.VipCoinMultiplier else 1)
-	coinsLabel.Text = string.format("🪙 %d", data.coins)
+	coinsLabel.Text = string.format("%d", data.coins)
 		.. (if multiplier > 1 then string.format("   (x%s)", string.format("%g", multiplier)) else "")
 end
 
@@ -307,12 +307,16 @@ local function build()
 		BackgroundColor3 = UI.Colors.Good,
 	}, xpBar)
 	UI.corner(xpFill, 5)
+	UI.coinIcon(stats, {
+		Position = UDim2.fromOffset(12, 54),
+		Size = UDim2.fromOffset(22, 22),
+	})
 	coinsLabel = UI.label(stats, {
-		Position = UDim2.fromOffset(12, 52),
-		Size = UDim2.new(1, -24, 0, 26),
+		Position = UDim2.fromOffset(42, 52),
+		Size = UDim2.new(1, -54, 0, 26),
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextColor3 = UI.Colors.Gold,
-		Text = "🪙 0",
+		Text = "0",
 	})
 
 	UI.label(gui, {

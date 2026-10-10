@@ -66,6 +66,38 @@ function UI.button(parent: Instance, text: string, color: Color3?, props: { [str
 	return button
 end
 
+-- Moneda del juego dibujada con piezas de interfaz (Roblox no tiene el emoji 🪙)
+function UI.coinIcon(parent: Instance, props: { [string]: any }): Frame
+	local coin = UI.new("Frame", { BackgroundColor3 = Color3.new(1, 1, 1) }, nil)
+	for key, value in props do
+		(coin :: any)[key] = value
+	end
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, coin)
+	UI.new("UIStroke", { Thickness = 2, Color = Color3.fromRGB(140, 80, 0) }, coin)
+	UI.new("UIGradient", {
+		Color = ColorSequence.new(Color3.fromRGB(255, 240, 150), Color3.fromRGB(240, 160, 0)),
+		Rotation = 90,
+	}, coin)
+	local inner = UI.new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.6, 0.6),
+		BackgroundTransparency = 1,
+	}, coin)
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, inner)
+	UI.new("UIStroke", { Thickness = 1.5, Color = Color3.fromRGB(200, 120, 0) }, inner)
+	-- Brillo
+	local glint = UI.new("Frame", {
+		Position = UDim2.fromScale(0.22, 0.18),
+		Size = UDim2.fromScale(0.22, 0.22),
+		BackgroundColor3 = Color3.new(1, 1, 1),
+		BackgroundTransparency = 0.25,
+	}, coin)
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, glint)
+	coin.Parent = parent
+	return coin
+end
+
 -- Escala un elemento según el tamaño de la pantalla (móviles más pequeño)
 function UI.autoScale(guiObject: GuiObject, minScale: number?)
 	local scale = UI.new("UIScale", nil, guiObject)
