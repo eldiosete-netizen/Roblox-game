@@ -281,6 +281,13 @@ local THEMES: { [string]: Theme } = {
 		wall = Color3.fromRGB(90, 140, 60),
 		material = Enum.Material.Wood,
 	},
+	Cielo = {
+		platform = Color3.fromRGB(250, 250, 255),
+		runway = Color3.fromRGB(200, 205, 225),
+		accent = Color3.fromRGB(255, 205, 40),
+		wall = Color3.fromRGB(255, 225, 120),
+		material = Enum.Material.Marble,
+	},
 }
 
 -- Para añadir un mapa nuevo: añade una entrada aquí
@@ -410,6 +417,48 @@ CourseBuilder.Definitions = {
 			m:block(20, 14, 14)
 			m:gap(6)
 			m:finish(16)
+		end,
+	},
+	{
+		id = "cielo",
+		theme = THEMES.Cielo,
+		attributes = {
+			DisplayName = "Cielo",
+			Order = 4,
+			Color = THEMES.Cielo.accent,
+			Vip = true,
+			Bronze = 55,
+			Silver = 42,
+			Gold = 33,
+			Dev = 27,
+		},
+		build = function(m)
+			m:start()
+			m:runway(40)
+			for _, jump in { { 4, 1 }, { -4, 3 }, { 4, 5 } } do
+				m:gap(9)
+				m:block(6, 6, jump[2], jump[1])
+			end
+			m:gap(9)
+			m:checkpoint(m:block(12, 12, 3))
+			m:wallRun(1, 40, 3)
+			m:checkpoint(m:wallRun(-1, 40, 3))
+			m:trampoline(3)
+			m:gap(12)
+			m:block(16, 10, 24)
+			m:zipline(80, 14, 24)
+			m:block(16, 14, 10)
+			m:lowGravity(56, 10)
+			m:gap(22)
+			m:block(6, 6, 16)
+			m:gap(22)
+			m:block(6, 6, 10)
+			m:gap(8)
+			m:checkpoint(m:block(14, 14, 8))
+			m:runway(30, 8)
+			m:ramp(16, 6, 8)
+			m:gap(18)
+			m:finish(12)
 		end,
 	},
 }

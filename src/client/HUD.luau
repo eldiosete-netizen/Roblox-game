@@ -33,6 +33,9 @@ local countdownLabel: TextLabel
 local countdownScale: UIScale
 local controlsLabel: TextLabel
 local sideBar: Frame
+local levelLabel: TextLabel
+local xpFill: Frame
+local coinsLabel: TextLabel
 
 local running = false
 local startTime = 0
@@ -76,6 +79,17 @@ function HUD.addSideButton(text: string, order: number, color: Color3?, callback
 end
 
 -- Información del mapa actual ----------------------------------------------------------
+
+local function updateStats()
+	local data = ClientState.data
+	if not data then
+		return
+	end
+	local level, current, needed = Config.LevelFromXP(data.xp)
+	levelLabel.Text = string.format("Nivel %d", level) .. (if data.vip then "  ⭐ VIP" else "")
+	xpFill.Size = UDim2.fromScale(math.clamp(current / needed, 0, 1), 1)
+	coinsLabel.Text = string.format("🪙 %d", data.coins)
+end
 
 local function nextMedalText(mapId: string): string
 	local folder = ClientState.mapFolder(mapId)
@@ -263,6 +277,42 @@ local function build()
 	})
 	UI.new("UITextSizeConstraint", { MaxTextSize = 18 }, controlsLabel)
 
+	-- Nivel, XP y monedas (arriba a la izquierda)
+	local stats = UI.new("Frame", {
+		Name = "Stats",
+		Position = UDim2.fromOffset(16, 64),
+		Size = UDim2.fromOffset(220, 84),
+		BackgroundColor3 = UI.Colors.Background,
+		BackgroundTransparency = 0.3,
+	}, gui)
+	UI.corner(stats, 10)
+	UI.autoScale(stats, 0.6)
+	levelLabel = UI.label(stats, {
+		Position = UDim2.fromOffset(12, 6),
+		Size = UDim2.new(1, -24, 0, 26),
+		Font = Enum.Font.GothamBlack,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = "Nivel 1",
+	})
+	local xpBar = UI.new("Frame", {
+		Position = UDim2.fromOffset(12, 36),
+		Size = UDim2.new(1, -24, 0, 10),
+		BackgroundColor3 = UI.Colors.Card,
+	}, stats)
+	UI.corner(xpBar, 5)
+	xpFill = UI.new("Frame", {
+		Size = UDim2.fromScale(0, 1),
+		BackgroundColor3 = UI.Colors.Good,
+	}, xpBar)
+	UI.corner(xpFill, 5)
+	coinsLabel = UI.label(stats, {
+		Position = UDim2.fromOffset(12, 52),
+		Size = UDim2.new(1, -24, 0, 26),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = UI.Colors.Gold,
+		Text = "🪙 0",
+	})
+
 	sideBar = UI.new("Frame", {
 		Name = "SideBar",
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -294,7 +344,9 @@ function HUD.start()
 
 	player:GetAttributeChangedSignal("MapId"):Connect(updateMapInfo)
 	ClientState.Changed:Connect(updateMapInfo)
+	ClientState.Changed:Connect(updateStats)
 	updateMapInfo()
+	updateStats()
 
 	HUD.addSideButton("🏠 Lobby", 90, nil, function()
 		Remotes.ReturnToLobby:FireServer()
@@ -362,6 +414,9 @@ function HUD.start()
 		end
 		if result.rewards.xp and result.rewards.xp > 0 then
 			table.insert(parts, string.format("+%d XP", result.rewards.xp))
+		end
+		if result.rewards.levelUp then
+			table.insert(parts, string.format("¡Nivel %d!", result.rewards.levelUp))
 		end
 		local subtext = table.concat(parts, "   ")
 

@@ -53,10 +53,12 @@ local function play(mapId: string)
 	end
 end
 
--- Otros módulos pueden personalizar las tarjetas (por ejemplo, bloquear mapas VIP)
-local cardDecorators: { (Frame, Folder, TextButton) -> () } = {}
+-- Otros módulos pueden personalizar las tarjetas (por ejemplo, bloquear mapas VIP).
+-- Si el decorador devuelve una función, sustituye a la acción del botón JUGAR.
+type Decorator = (Frame, Folder, TextButton) -> (() -> ())?
+local cardDecorators: { Decorator } = {}
 
-function MapMenu.decorateCards(decorator: (Frame, Folder, TextButton) -> ())
+function MapMenu.decorateCards(decorator: Decorator)
 	table.insert(cardDecorators, decorator)
 end
 
@@ -125,13 +127,15 @@ function MapMenu.refresh()
 			Position = UDim2.new(1, -14, 0.5, 0),
 			Size = UDim2.fromOffset(140, 56),
 		})
-		playButton.Activated:Connect(function()
+		local action = function()
 			play(folder.Name)
-		end)
-
-		for _, decorate in cardDecorators do
-			decorate(card, folder, playButton)
 		end
+		for _, decorate in cardDecorators do
+			action = decorate(card, folder, playButton) or action
+		end
+		playButton.Activated:Connect(function()
+			action()
+		end)
 	end
 end
 

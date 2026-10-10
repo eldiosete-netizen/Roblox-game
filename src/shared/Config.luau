@@ -77,6 +77,25 @@ local Config = {
 		TimeLimit = 180, -- segundos máximos de carrera
 	},
 
+	-- Recompensas
+	Rewards = {
+		FinishCoins = 10,
+		FirstFinishCoins = 25, -- la primera vez que terminas un mapa
+		RecordCoins = 5,
+		MedalCoins = { 15, 30, 60, 150 }, -- bronce, plata, oro, desarrollador (solo la primera vez)
+		FinishXP = 40,
+		MedalXP = 20, -- por cada nivel de medalla conseguido en la carrera
+		RecordXP = 20,
+		LivePlaceCoins = { 50, 30, 20 }, -- 1º, 2º y 3º en carrera en vivo
+		LiveParticipationCoins = 10,
+		LiveXP = 30,
+		TutorialCoins = 50,
+	},
+
+	-- VIP (Game Pass). Crea el pase en el Creator Hub y pon aquí su ID.
+	VipGamePassId = 0,
+	VipCoinMultiplier = 1.5,
+
 	-- Ajustes por defecto del jugador
 	DefaultSettings = {
 		shake = true, -- temblor de cámara
@@ -116,6 +135,18 @@ end
 
 function Config.MedalInfo(rank: number)
 	return Config.Medals[#Config.Medals - rank + 1]
+end
+
+-- Nivel a partir de la XP total. Devuelve: nivel, XP dentro del nivel, XP para subir
+function Config.LevelFromXP(xp: number): (number, number, number)
+	local level = 1
+	local needed = 100
+	while xp >= needed do
+		xp -= needed
+		level += 1
+		needed = 100 + 50 * (level - 1)
+	end
+	return level, xp, needed
 end
 
 function Config.FormatTime(seconds: number?): string

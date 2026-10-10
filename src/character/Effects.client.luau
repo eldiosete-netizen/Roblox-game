@@ -1,12 +1,17 @@
--- Efectos visuales y de sonido del movimiento: poses, rastro, partículas,
--- viento, sonidos y temblor de cámara al caer fuerte.
--- Lee el estado que publica Movement (atributos ParkourState, WallSide, WallJumpTick).
--- Nota: estos efectos son locales, solo los ve el propio jugador.
+-- Efectos visuales y de sonido del movimiento: poses, partículas de salto y
+-- deslizamiento, viento, sonidos y temblor de cámara al caer fuerte.
+-- Lee el estado que publica Movement (atributos ParkourState, WallSide, WallJumpTick)
+-- y los cosméticos equipados (atributos JumpItem y SlideItem del jugador).
+-- Nota: estos efectos son locales, solo los ve el propio jugador. El rastro lo
+-- pone el servidor (Shop) para que lo vea todo el mundo.
+
+local Players = game:GetService("Players")
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Catalog = require(Shared:WaitForChild("Catalog"))
 local Config = require(Shared:WaitForChild("Config"))
 local Sfx = require(Shared:WaitForChild("Sfx"))
 
@@ -14,6 +19,13 @@ local character = script:FindFirstAncestorOfClass("Model") :: Model
 local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 local root = character:WaitForChild("HumanoidRootPart") :: BasePart
 local camera = workspace.CurrentCamera
+local player = Players.LocalPlayer
+
+local ClientState = require(player:WaitForChild("PlayerScripts"):WaitForChild("Client"):WaitForChild("ClientState"))
+
+local function equipped(kind: string): Catalog.Item
+	return Catalog.byId[player:GetAttribute(kind .. "Item") or ""] or Catalog.byId[Catalog.Defaults[kind]]
+end
 
 local SHAKE_STEP = "ParkourCameraShake"
 
@@ -42,31 +54,7 @@ local function targetPose(state: string?): CFrame
 	return CFrame.identity
 end
 
--- Rastro a alta velocidad --------------------------------------------------------
-
-local trailTop = Instance.new("Attachment")
-trailTop.Name = "TrailTop"
-trailTop.Position = Vector3.new(0, 0.8, 0.4)
-trailTop.Parent = root
-
-local trailBottom = Instance.new("Attachment")
-trailBottom.Name = "TrailBottom"
-trailBottom.Position = Vector3.new(0, -0.8, 0.4)
-trailBottom.Parent = root
-
-local trail = Instance.new("Trail")
-trail.Attachment0 = trailTop
-trail.Attachment1 = trailBottom
-trail.Lifetime = 0.35
-trail.LightEmission = 1
-trail.FaceCamera = true
-trail.Color = ColorSequence.new(Color3.fromRGB(0, 200, 255), Color3.fromRGB(170, 80, 255))
-trail.Transparency = NumberSequence.new(0.3, 1)
-trail.WidthScale = NumberSequence.new(1, 0)
-trail.Enabled = false
-trail.Parent = root
-
--- Polvo al deslizar ---------------------------------------------------------------
+-- Partículas al deslizar y al saltar ----------------------------------------------
 
 local feet = Instance.new("Attachment")
 feet.Name = "SlideDust"
@@ -82,9 +70,28 @@ dust.Speed = NumberRange.new(4, 8)
 dust.SpreadAngle = Vector2.new(35, 35)
 dust.Size = NumberSequence.new(0.6, 1.8)
 dust.Transparency = NumberSequence.new(0.4, 1)
-dust.Color = ColorSequence.new(Color3.fromRGB(220, 220, 230))
+dust.Color = Catalog.colorSequence(equipped("Slide"))
 dust.Enabled = false
 dust.Parent = feet
+
+local jumpBurst = Instance.new("ParticleEmitter")
+jumpBurst.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+jumpBurst.EmissionDirection = Enum.NormalId.Bottom
+jumpBurst.Rate = 0
+jumpBurst.Lifetime = NumberRange.new(0.3, 0.6)
+jumpBurst.Speed = NumberRange.new(6, 12)
+jumpBurst.SpreadAngle = Vector2.new(70, 70)
+jumpBurst.Size = NumberSequence.new(0.5, 0)
+jumpBurst.LightEmission = 0.6
+jumpBurst.Parent = feet
+
+local function updateCosmetics()
+	dust.Color = Catalog.colorSequence(equipped("Slide"))
+	jumpBurst.Color = Catalog.colorSequence(equipped("Jump"))
+end
+updateCosmetics()
+local slideItemConnection = player:GetAttributeChangedSignal("SlideItem"):Connect(updateCosmetics)
+local jumpItemConnection = player:GetAttributeChangedSignal("JumpItem"):Connect(updateCosmetics)
 
 -- Viento según la velocidad ------------------------------------------------------
 
@@ -101,6 +108,9 @@ local shakeTime = 0
 local shakeStrength = 0
 
 local function shake(strength: number)
+	if not ClientState.setting("shake") then
+		return
+	end
 	shakeStrength = math.max(if shakeTime > 0 then shakeStrength else 0, strength)
 	shakeTime = SHAKE_DURATION
 end
@@ -120,6 +130,9 @@ end)
 local peakFallSpeed = 0
 
 humanoid.StateChanged:Connect(function(_, newState)
+	if newState == Enum.HumanoidStateType.Jumping and equipped("Jump").id ~= Catalog.Defaults.Jump then
+		jumpBurst:Emit(25)
+	end
 	if newState == Enum.HumanoidStateType.Landed then
 		if peakFallSpeed > Config.HardLandingSpeed then
 			local strength = math.clamp((peakFallSpeed - Config.HardLandingSpeed) / 80, 0.3, 1)
@@ -155,7 +168,6 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 		rootJoint.C0 = poseOffset * baseC0
 	end
 
-	trail.Enabled = speed > Config.TrailSpeed or state == "WallRun"
 	dust.Enabled = state == "Slide" and not airborne
 
 	if airborne then
@@ -168,13 +180,15 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 			0,
 			1
 		)
-		wind.Volume = 0.5 * alpha
+		wind.Volume = if ClientState.setting("wind") then 0.5 * alpha else 0
 		wind.PlaybackSpeed = 0.8 + 0.4 * alpha
 	end
 end)
 
 local function cleanup()
 	connection:Disconnect()
+	slideItemConnection:Disconnect()
+	jumpItemConnection:Disconnect()
 	pcall(RunService.UnbindFromRenderStep, RunService, SHAKE_STEP)
 	if wind then
 		wind:Destroy()

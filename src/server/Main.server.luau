@@ -13,6 +13,10 @@ local Leaderboard = require(Server:WaitForChild("Leaderboard"))
 local RaceService = require(Server:WaitForChild("RaceService"))
 local Ghosts = require(Server:WaitForChild("Ghosts"))
 local LiveRace = require(Server:WaitForChild("LiveRace"))
+local Economy = require(Server:WaitForChild("Economy"))
+local Shop = require(Server:WaitForChild("Shop"))
+
+local Config = require(Shared:WaitForChild("Config"))
 
 Maps.init()
 
@@ -30,6 +34,8 @@ end
 RaceService.init()
 Ghosts.init()
 LiveRace.init()
+Economy.init()
+Shop.init()
 
 -- Tabla de jugadores (leaderstats)
 local function countMedals(data): number
@@ -43,9 +49,11 @@ end
 local function setupLeaderstats(player: Player)
 	local leaderstats = Instance.new("Folder")
 	leaderstats.Name = "leaderstats"
-	local medals = Instance.new("IntValue")
-	medals.Name = "Medallas"
-	medals.Parent = leaderstats
+	for _, name in { "Nivel", "Monedas", "Medallas" } do
+		local value = Instance.new("IntValue")
+		value.Name = name
+		value.Parent = leaderstats
+	end
 	leaderstats.Parent = player
 end
 
@@ -58,6 +66,9 @@ end
 PlayerData.addSnapshotField(function(player, snapshot)
 	local leaderstats = player:FindFirstChild("leaderstats")
 	if leaderstats then
-		(leaderstats :: any).Medallas.Value = countMedals(snapshot)
+		local stats = leaderstats :: any
+		stats.Nivel.Value = Config.LevelFromXP(snapshot.xp)
+		stats.Monedas.Value = snapshot.coins
+		stats.Medallas.Value = countMedals(snapshot)
 	end
 end)
