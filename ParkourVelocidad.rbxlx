@@ -105,7 +105,7 @@ return Catalog
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "2.5",
+	Version = "2.6",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -857,6 +857,7 @@ CourseBuilder.Definitions = {
 			Order = 1,
 			Color = THEMES.Ciudad.accent,
 			Price = 0,
+			Reward = 1, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
@@ -893,6 +894,7 @@ CourseBuilder.Definitions = {
 			Order = 2,
 			Color = THEMES.Neon.accent,
 			Price = 150,
+			Reward = 1.5, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
@@ -952,6 +954,7 @@ CourseBuilder.Definitions = {
 			Order = 3,
 			Color = THEMES.Selva.accent,
 			Price = 400,
+			Reward = 2, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
@@ -1013,6 +1016,7 @@ CourseBuilder.Definitions = {
 			Color = THEMES.Cielo.accent,
 			Vip = true,
 			Price = 0,
+			Reward = 3, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
@@ -1635,6 +1639,8 @@ function Economy.init()
 				coins += rewards.MedalCoins[rank] or 0
 			end
 			xp += result.medal * rewards.MedalXP
+			-- Los mapas más difíciles dan más monedas
+			coins = math.floor(coins * map.reward + 0.5)
 		end
 
 		Economy.give(player, coins, xp, result.rewards)
@@ -2845,6 +2851,7 @@ export type MapInfo = {
 	vip: boolean,
 	tutorial: boolean,
 	price: number, -- monedas para desbloquearlo (0 = gratis)
+	reward: number, -- multiplicador de monedas al jugarlo (1 = normal)
 	medals: { [string]: number },
 	startPad: BasePart,
 	startGate: BasePart,
@@ -2892,6 +2899,7 @@ local function parse(folder: Folder): MapInfo?
 		vip = folder:GetAttribute("Vip") == true,
 		tutorial = folder:GetAttribute("Tutorial") == true,
 		price = folder:GetAttribute("Price") or 0,
+		reward = folder:GetAttribute("Reward") or 1,
 		medals = medals,
 		startPad = startPad,
 		startGate = startGate,
@@ -5541,11 +5549,16 @@ function MapMenu.refresh()
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = UI.Colors.Muted,
 			Text = if locked
-				then string.format("🔒 Bloqueado   ·   Precio: %d monedas", price)
+				then string.format(
+					"🔒 Bloqueado   ·   Precio: %d monedas   ·   Monedas x%s",
+					price,
+					string.format("%g", folder:GetAttribute("Reward") or 1)
+				)
 				else string.format(
-					"Mejor: %s   ·   Medalla: %s",
+					"Mejor: %s   ·   Medalla: %s   ·   Monedas x%s",
 					Config.FormatTime(mapData and mapData.best),
-					if earned > 0 then Config.MedalInfo(earned).name else "ninguna"
+					if earned > 0 then Config.MedalInfo(earned).name else "ninguna",
+					string.format("%g", folder:GetAttribute("Reward") or 1)
 				),
 		})
 		medalRow(card, folder, earned)

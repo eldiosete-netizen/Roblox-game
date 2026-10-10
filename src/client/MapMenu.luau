@@ -119,11 +119,16 @@ function MapMenu.refresh()
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = UI.Colors.Muted,
 			Text = if locked
-				then string.format("🔒 Bloqueado   ·   Precio: %d monedas", price)
+				then string.format(
+					"🔒 Bloqueado   ·   Precio: %d monedas   ·   Monedas x%s",
+					price,
+					string.format("%g", folder:GetAttribute("Reward") or 1)
+				)
 				else string.format(
-					"Mejor: %s   ·   Medalla: %s",
+					"Mejor: %s   ·   Medalla: %s   ·   Monedas x%s",
 					Config.FormatTime(mapData and mapData.best),
-					if earned > 0 then Config.MedalInfo(earned).name else "ninguna"
+					if earned > 0 then Config.MedalInfo(earned).name else "ninguna",
+					string.format("%g", folder:GetAttribute("Reward") or 1)
 				),
 		})
 		medalRow(card, folder, earned)

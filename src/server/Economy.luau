@@ -83,6 +83,8 @@ function Economy.init()
 				coins += rewards.MedalCoins[rank] or 0
 			end
 			xp += result.medal * rewards.MedalXP
+			-- Los mapas más difíciles dan más monedas
+			coins = math.floor(coins * map.reward + 0.5)
 		end
 
 		Economy.give(player, coins, xp, result.rewards)

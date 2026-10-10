@@ -13,6 +13,7 @@ export type MapInfo = {
 	vip: boolean,
 	tutorial: boolean,
 	price: number, -- monedas para desbloquearlo (0 = gratis)
+	reward: number, -- multiplicador de monedas al jugarlo (1 = normal)
 	medals: { [string]: number },
 	startPad: BasePart,
 	startGate: BasePart,
@@ -60,6 +61,7 @@ local function parse(folder: Folder): MapInfo?
 		vip = folder:GetAttribute("Vip") == true,
 		tutorial = folder:GetAttribute("Tutorial") == true,
 		price = folder:GetAttribute("Price") or 0,
+		reward = folder:GetAttribute("Reward") or 1,
 		medals = medals,
 		startPad = startPad,
 		startGate = startGate,

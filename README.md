@@ -62,7 +62,7 @@ Si copias los scripts a mano en otro proyecto, desactiva **Workspace > Streaming
 1. **Guardar datos**: en Studio, **Home > Game Settings > Security > Enable Studio Access to API Services**. Sin esto el juego funciona, pero nada se guarda entre sesiones.
 2. **Game Pass**: crea los pases en el [Creator Hub](https://create.roblox.com) (tu juego > Monetization > Passes) y pon sus IDs en `src/shared/Config.luau`: el VIP en `VipGamePassId` y los de monedas en `CoinPasses` (x2, x3, x5 y x10). Los pases sin ID salen como "Próximamente".
 3. **Medallas**: los tiempos de medalla se calculan solos según la longitud de cada mapa. Si quieres fijarlos a mano, añade `Bronze`, `Silver`, `Gold` y `Dev` en los atributos del mapa en `src/server/CourseBuilder.luau`. Lo normal es poner como medalla de desarrollador tu mejor tiempo.
-4. **Precio de los niveles**: atributo `Price` de cada mapa en `CourseBuilder.luau` (0 = gratis).
+4. **Precio y recompensa de los niveles**: atributos `Price` (monedas para desbloquearlo, 0 = gratis) y `Reward` (multiplicador de monedas: Ciudad x1, Neón x1,5, Selva x2 y Cielo x3) de cada mapa en `CourseBuilder.luau`.
 5. **Carreras en vivo**: necesitan 2 jugadores. Para probar solo en Studio, pon `LiveRace.MinPlayers = 1` en `Config.luau`.
 6. **Sonidos**: usan archivos que vienen con Roblox. Si alguno no suena, busca otro en la Creator Store (Toolbox > Audio) y pon su ID en `Sounds` dentro de `Config.luau` así: `"rbxassetid://123456789"`.
 

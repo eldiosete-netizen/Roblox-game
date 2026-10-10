@@ -362,6 +362,7 @@ CourseBuilder.Definitions = {
 			Order = 1,
 			Color = THEMES.Ciudad.accent,
 			Price = 0,
+			Reward = 1, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
@@ -398,6 +399,7 @@ CourseBuilder.Definitions = {
 			Order = 2,
 			Color = THEMES.Neon.accent,
 			Price = 150,
+			Reward = 1.5, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
@@ -457,6 +459,7 @@ CourseBuilder.Definitions = {
 			Order = 3,
 			Color = THEMES.Selva.accent,
 			Price = 400,
+			Reward = 2, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
@@ -518,6 +521,7 @@ CourseBuilder.Definitions = {
 			Color = THEMES.Cielo.accent,
 			Vip = true,
 			Price = 0,
+			Reward = 3, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
 			m:start()
