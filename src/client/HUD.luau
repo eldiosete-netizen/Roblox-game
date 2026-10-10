@@ -313,6 +313,17 @@ local function build()
 		Text = "🪙 0",
 	})
 
+	UI.label(gui, {
+		Name = "Version",
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -8, 1, -4),
+		Size = UDim2.fromOffset(120, 16),
+		Font = Enum.Font.Gotham,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextTransparency = 0.5,
+		Text = "v" .. Config.Version,
+	})
+
 	sideBar = UI.new("Frame", {
 		Name = "SideBar",
 		AnchorPoint = Vector2.new(1, 0.5),

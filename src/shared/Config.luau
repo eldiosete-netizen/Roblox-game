@@ -2,6 +2,9 @@
 -- Cambia estos valores para ajustar cómo se siente el juego.
 
 local Config = {
+	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
+	Version = "1.7",
+
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
 	MaxWalkSpeed = 34, -- velocidad máxima corriendo (momentum)

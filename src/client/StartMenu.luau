@@ -4,7 +4,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
-local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Remotes = require(Shared:WaitForChild("Remotes"))
 
 local ClientState = require(script.Parent:WaitForChild("ClientState"))
 local HUD = require(script.Parent:WaitForChild("HUD"))
@@ -112,6 +114,15 @@ function StartMenu.start()
 		close()
 		UI.open("Settings")
 	end)
+
+	UI.label(background, {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -16, 1, -12),
+		Size = UDim2.fromOffset(200, 24),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextColor3 = UI.Colors.Muted,
+		Text = "Versión " .. Config.Version,
+	})
 
 	updateTutorialHint()
 	ClientState.Changed:Connect(updateTutorialHint)
