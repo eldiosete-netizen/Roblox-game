@@ -51,6 +51,13 @@ local lastWallRunEnd = -math.huge
 local lastWall: Instance? = nil
 local cameraTilt = 0
 
+-- Estado visible para el script de efectos (Effects): "None", "Slide" o "WallRun"
+local function setParkourState(name: string)
+	if character:GetAttribute("ParkourState") ~= name then
+		character:SetAttribute("ParkourState", name)
+	end
+end
+
 local function isGrounded(): boolean
 	return humanoid.FloorMaterial ~= Enum.Material.Air
 end
@@ -132,6 +139,8 @@ local function tryStartWallRun()
 	end
 
 	wallRunning = true
+	-- 1 = pared a la derecha, -1 = pared a la izquierda
+	character:SetAttribute("WallSide", if hit.Normal:Dot(root.CFrame.RightVector) < 0 then 1 else -1)
 	wallNormal = hit.Normal
 	wallTangent = tangent
 	wallRunStart = now
@@ -167,11 +176,25 @@ UserInputService.JumpRequest:Connect(function()
 		+ Vector3.new(0, Config.WallJumpUpForce, 0)
 		+ wallTangent * Config.WallRunSpeed * 0.8
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+	character:SetAttribute("WallJumpTick", (character:GetAttribute("WallJumpTick") or 0) + 1)
 end)
 
 -- Bucle principal ------------------------------------------------------------
 
 local connection = RunService.Heartbeat:Connect(function(dt)
+	-- Congelado durante la cuenta atrás
+	if player:GetAttribute("Frozen") then
+		stopWallRun()
+		slideEndTime = 0
+		currentSpeed = Config.BaseWalkSpeed
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoid.CameraOffset = Vector3.zero
+		setParkourState("None")
+		return
+	end
+	humanoid.JumpPower = Config.JumpPower
+
 	local now = os.clock()
 	local moving = humanoid.MoveDirection.Magnitude > 0.1
 
@@ -191,11 +214,14 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 	-- Velocidad final según la acción actual
 	if wallRunning then
 		humanoid.WalkSpeed = Config.WallRunSpeed
+		setParkourState("WallRun")
 	elseif now < slideEndTime then
 		local remaining = (slideEndTime - now) / Config.SlideDuration
 		humanoid.WalkSpeed = currentSpeed + Config.SlideBoost * remaining
+		setParkourState("Slide")
 	else
 		humanoid.WalkSpeed = currentSpeed
+		setParkourState("None")
 		if humanoid.CameraOffset ~= Vector3.zero then
 			humanoid.CameraOffset = Vector3.zero
 		end

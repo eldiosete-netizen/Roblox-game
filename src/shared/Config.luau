@@ -28,7 +28,27 @@ local Config = {
 	BaseFOV = 70,
 	MaxFOV = 92,
 
+	-- Efectos
+	TrailSpeed = 28, -- a partir de esta velocidad aparece el rastro
+	HardLandingSpeed = 60, -- caídas más rápidas que esto hacen temblar la cámara
+	SlidePoseLean = 55, -- grados que se inclina el cuerpo hacia atrás al deslizar
+	WallRunPoseLean = 20, -- grados que se inclina el cuerpo hacia la pared
+
+	-- Sonidos (cámbialos por IDs de la Creator Store: "rbxassetid://123456")
+	Sounds = {
+		Countdown = "rbxasset://sounds/electronicpingshort.wav",
+		Go = "rbxasset://sounds/electronicpingshort.wav",
+		Checkpoint = "rbxasset://sounds/electronicpingshort.wav",
+		Finish = "rbxasset://sounds/victory.wav",
+		Record = "rbxasset://sounds/victory.wav",
+		Slide = "rbxasset://sounds/swoosh.wav",
+		WallJump = "rbxasset://sounds/swoosh.wav",
+		Land = "rbxasset://sounds/action_jump_land.mp3",
+		Wind = "rbxasset://sounds/action_falling.mp3",
+	},
+
 	-- Carrera
+	CountdownSeconds = 3,
 	CourseHeight = 50, -- altura del circuito generado
 	FallY = 20, -- si caes por debajo de esta Y, vuelves al último checkpoint
 	MinValidTime = 5, -- tiempos más rápidos se consideran trampa

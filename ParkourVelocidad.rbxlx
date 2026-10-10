@@ -40,7 +40,27 @@ local Config = {
 	BaseFOV = 70,
 	MaxFOV = 92,
 
+	-- Efectos
+	TrailSpeed = 28, -- a partir de esta velocidad aparece el rastro
+	HardLandingSpeed = 60, -- caídas más rápidas que esto hacen temblar la cámara
+	SlidePoseLean = 55, -- grados que se inclina el cuerpo hacia atrás al deslizar
+	WallRunPoseLean = 20, -- grados que se inclina el cuerpo hacia la pared
+
+	-- Sonidos (cámbialos por IDs de la Creator Store: "rbxassetid://123456")
+	Sounds = {
+		Countdown = "rbxasset://sounds/electronicpingshort.wav",
+		Go = "rbxasset://sounds/electronicpingshort.wav",
+		Checkpoint = "rbxasset://sounds/electronicpingshort.wav",
+		Finish = "rbxasset://sounds/victory.wav",
+		Record = "rbxasset://sounds/victory.wav",
+		Slide = "rbxasset://sounds/swoosh.wav",
+		WallJump = "rbxasset://sounds/swoosh.wav",
+		Land = "rbxasset://sounds/action_jump_land.mp3",
+		Wind = "rbxasset://sounds/action_falling.mp3",
+	},
+
 	-- Carrera
+	CountdownSeconds = 3,
 	CourseHeight = 50, -- altura del circuito generado
 	FallY = 20, -- si caes por debajo de esta Y, vuelves al último checkpoint
 	MinValidTime = 5, -- tiempos más rápidos se consideran trampa
@@ -62,17 +82,56 @@ return Config
 ]]></string>
         </Properties>
       </Item>
+      <Item class="ModuleScript" referent="3">
+        <Properties>
+          <string name="Name">Sfx</string>
+          <string name="Source"><![CDATA[-- Reproduce sonidos 2D en el cliente (solo los oye el jugador local).
+
+local Debris = game:GetService("Debris")
+local SoundService = game:GetService("SoundService")
+
+local Config = require(script.Parent:WaitForChild("Config"))
+
+local Sfx = {}
+
+function Sfx.create(name: string, volume: number?): Sound?
+	local id = Config.Sounds[name]
+	if not id or id == "" then
+		return nil
+	end
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.SoundId = id
+	sound.Volume = volume or 0.6
+	sound.Parent = SoundService
+	return sound
+end
+
+function Sfx.play(name: string, playbackSpeed: number?, volume: number?)
+	local sound = Sfx.create(name, volume)
+	if not sound then
+		return
+	end
+	sound.PlaybackSpeed = playbackSpeed or 1
+	sound:Play()
+	Debris:AddItem(sound, 10)
+end
+
+return Sfx
+]]></string>
+        </Properties>
+      </Item>
     </Item>
   </Item>
-  <Item class="ServerScriptService" referent="3">
+  <Item class="ServerScriptService" referent="4">
     <Properties>
       <string name="Name">ServerScriptService</string>
     </Properties>
-    <Item class="Folder" referent="4">
+    <Item class="Folder" referent="5">
       <Properties>
         <string name="Name">Server</string>
       </Properties>
-      <Item class="ModuleScript" referent="5">
+      <Item class="ModuleScript" referent="6">
         <Properties>
           <string name="Name">CourseBuilder</string>
           <string name="Source"><![CDATA[-- Genera un circuito de prueba si en Workspace no hay una carpeta "Course".
@@ -269,7 +328,7 @@ return CourseBuilder
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="6">
+      <Item class="ModuleScript" referent="7">
         <Properties>
           <string name="Name">Leaderboard</string>
           <string name="Source"><![CDATA[-- Guarda los mejores tiempos (OrderedDataStore) y muestra el ranking global.
@@ -466,7 +525,7 @@ return Leaderboard
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="7">
+      <Item class="Script" referent="8">
         <Properties>
           <string name="Name">RaceService</string>
           <token name="RunContext">0</token>
@@ -491,6 +550,7 @@ local function newRemote(name: string): RemoteEvent
 	return remote
 end
 
+local RaceCountdown = newRemote("RaceCountdown") -- (seconds)
 local RaceStarted = newRemote("RaceStarted") -- (totalCheckpoints)
 local CheckpointReached = newRemote("CheckpointReached") -- (index, total, splitTime)
 local RaceFinished = newRemote("RaceFinished") -- (time, bestTime, isNewRecord)
@@ -520,6 +580,7 @@ end
 
 type State = {
 	racing: boolean,
+	countdownToken: {}?,
 	startTime: number,
 	nextCheckpoint: number,
 	respawnCFrame: CFrame,
@@ -532,6 +593,11 @@ local states: { [Player]: State } = {}
 
 local function spawnCFrame(): CFrame
 	return spawnPart.CFrame * CFrame.new(0, spawnPart.Size.Y / 2 + 3, 0)
+end
+
+-- Justo delante de la línea de salida (la cara frontal de "Start" mira hacia el circuito)
+local function startCFrame(): CFrame
+	return startGate.CFrame * CFrame.new(0, -startGate.Size.Y / 2 + 3, -4)
 end
 
 local function checkpointCFrame(cp: BasePart): CFrame
@@ -570,15 +636,29 @@ local function setBest(player: Player, state: State, seconds: number)
 	end
 end
 
-local function resetState(state: State)
+local function setFrozen(player: Player, frozen: boolean)
+	player:SetAttribute("Frozen", frozen)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root then
+		root.Anchored = frozen
+	end
+end
+
+local function resetState(player: Player, state: State)
+	if state.countdownToken then
+		state.countdownToken = nil
+		setFrozen(player, false)
+	end
 	state.racing = false
 	state.nextCheckpoint = 1
 	state.respawnCFrame = spawnCFrame()
 end
 
-local function startRace(player: Player)
+-- Al cruzar la salida: te coloca en la línea, te congela y cuenta 3, 2, 1...
+local function beginCountdown(player: Player)
 	local state = states[player]
-	if not state then
+	if not state or state.countdownToken then
 		return
 	end
 	local now = os.clock()
@@ -586,11 +666,28 @@ local function startRace(player: Player)
 		return
 	end
 	state.lastStart = now
-	state.racing = true
-	state.startTime = now
+
+	local token = {}
+	state.countdownToken = token
+	state.racing = false
 	state.nextCheckpoint = 1
-	state.respawnCFrame = spawnCFrame()
-	RaceStarted:FireClient(player, totalCheckpoints)
+	state.respawnCFrame = startCFrame()
+
+	teleport(player, startCFrame())
+	setFrozen(player, true)
+	RaceCountdown:FireClient(player, Config.CountdownSeconds)
+
+	task.delay(Config.CountdownSeconds, function()
+		if states[player] ~= state or state.countdownToken ~= token then
+			return -- cancelada (reinicio, muerte o salida del juego)
+		end
+		state.countdownToken = nil
+		setFrozen(player, false)
+		state.racing = true
+		state.startTime = os.clock()
+		state.lastStart = state.startTime
+		RaceStarted:FireClient(player, totalCheckpoints)
+	end)
 end
 
 local function reachCheckpoint(player: Player, index: number)
@@ -613,7 +710,7 @@ local function finishRace(player: Player)
 	end
 
 	local elapsed = os.clock() - state.startTime
-	resetState(state)
+	resetState(player, state)
 
 	if elapsed < Config.MinValidTime then
 		RaceCancelled:FireClient(player, "Tiempo no válido")
@@ -639,7 +736,7 @@ end
 startGate.Touched:Connect(function(hit)
 	local player = playerFromHit(hit)
 	if player then
-		startRace(player)
+		beginCountdown(player)
 	end
 end)
 
@@ -684,7 +781,7 @@ RequestRestart.OnServerEvent:Connect(function(player)
 		return
 	end
 	state.lastRestart = now
-	resetState(state)
+	resetState(player, state)
 	RaceCancelled:FireClient(player, nil)
 	teleport(player, spawnCFrame())
 end)
@@ -712,7 +809,10 @@ local function onPlayerAdded(player: Player)
 
 	-- Si muere en mitad de la carrera, reaparece en su último checkpoint
 	player.CharacterAdded:Connect(function(character)
-		if state.racing then
+		if state.countdownToken then
+			resetState(player, state)
+			RaceCancelled:FireClient(player, nil)
+		elseif state.racing then
 			character:WaitForChild("HumanoidRootPart")
 			task.wait()
 			teleport(player, state.respawnCFrame)
@@ -754,19 +854,211 @@ end)
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="8">
+  <Item class="StarterPlayer" referent="9">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterCharacterScripts" referent="9">
+    <Item class="StarterCharacterScripts" referent="10">
       <Properties>
         <string name="Name">StarterCharacterScripts</string>
       </Properties>
-      <Item class="Folder" referent="10">
+      <Item class="Folder" referent="11">
         <Properties>
           <string name="Name">Character</string>
         </Properties>
-        <Item class="LocalScript" referent="11">
+        <Item class="LocalScript" referent="12">
+          <Properties>
+            <string name="Name">Effects</string>
+            <string name="Source"><![CDATA[-- Efectos visuales y de sonido del movimiento: poses, rastro, partículas,
+-- viento, sonidos y temblor de cámara al caer fuerte.
+-- Lee el estado que publica Movement (atributos ParkourState, WallSide, WallJumpTick).
+-- Nota: estos efectos son locales, solo los ve el propio jugador.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Sfx = require(Shared:WaitForChild("Sfx"))
+
+local character = script:FindFirstAncestorOfClass("Model") :: Model
+local humanoid = character:WaitForChild("Humanoid") :: Humanoid
+local root = character:WaitForChild("HumanoidRootPart") :: BasePart
+local camera = workspace.CurrentCamera
+
+local SHAKE_STEP = "ParkourCameraShake"
+
+local function horizontalSpeed(): number
+	local v = root.AssemblyLinearVelocity
+	return Vector3.new(v.X, 0, v.Z).Magnitude
+end
+
+-- Poses (inclinamos la articulación raíz; funciona con R15 y R6) ----------------
+
+local lowerTorso = character:FindFirstChild("LowerTorso")
+local rootJoint = (
+	if lowerTorso then lowerTorso:WaitForChild("Root", 5) else root:WaitForChild("RootJoint", 5)
+) :: Motor6D?
+local baseC0 = if rootJoint then rootJoint.C0 else CFrame.identity
+local poseOffset = CFrame.identity
+
+local function targetPose(state: string?): CFrame
+	if state == "Slide" then
+		-- Cuerpo bajo e inclinado hacia atrás
+		return CFrame.new(0, -1.3, 0) * CFrame.Angles(math.rad(Config.SlidePoseLean), 0, 0)
+	elseif state == "WallRun" then
+		local side = character:GetAttribute("WallSide") or 1
+		return CFrame.Angles(0, 0, -math.rad(Config.WallRunPoseLean) * side)
+	end
+	return CFrame.identity
+end
+
+-- Rastro a alta velocidad --------------------------------------------------------
+
+local trailTop = Instance.new("Attachment")
+trailTop.Name = "TrailTop"
+trailTop.Position = Vector3.new(0, 0.8, 0.4)
+trailTop.Parent = root
+
+local trailBottom = Instance.new("Attachment")
+trailBottom.Name = "TrailBottom"
+trailBottom.Position = Vector3.new(0, -0.8, 0.4)
+trailBottom.Parent = root
+
+local trail = Instance.new("Trail")
+trail.Attachment0 = trailTop
+trail.Attachment1 = trailBottom
+trail.Lifetime = 0.35
+trail.LightEmission = 1
+trail.FaceCamera = true
+trail.Color = ColorSequence.new(Color3.fromRGB(0, 200, 255), Color3.fromRGB(170, 80, 255))
+trail.Transparency = NumberSequence.new(0.3, 1)
+trail.WidthScale = NumberSequence.new(1, 0)
+trail.Enabled = false
+trail.Parent = root
+
+-- Polvo al deslizar ---------------------------------------------------------------
+
+local feet = Instance.new("Attachment")
+feet.Name = "SlideDust"
+feet.Position = Vector3.new(0, -(humanoid.HipHeight + root.Size.Y / 2) + 0.3, 0)
+feet.Parent = root
+
+local dust = Instance.new("ParticleEmitter")
+dust.Texture = "rbxasset://textures/particles/smoke_main.dds"
+dust.EmissionDirection = Enum.NormalId.Back
+dust.Rate = 40
+dust.Lifetime = NumberRange.new(0.3, 0.6)
+dust.Speed = NumberRange.new(4, 8)
+dust.SpreadAngle = Vector2.new(35, 35)
+dust.Size = NumberSequence.new(0.6, 1.8)
+dust.Transparency = NumberSequence.new(0.4, 1)
+dust.Color = ColorSequence.new(Color3.fromRGB(220, 220, 230))
+dust.Enabled = false
+dust.Parent = feet
+
+-- Viento según la velocidad ------------------------------------------------------
+
+local wind = Sfx.create("Wind", 0)
+if wind then
+	wind.Looped = true
+	wind:Play()
+end
+
+-- Temblor de cámara ---------------------------------------------------------------
+
+local SHAKE_DURATION = 0.35
+local shakeTime = 0
+local shakeStrength = 0
+
+local function shake(strength: number)
+	shakeStrength = math.max(if shakeTime > 0 then shakeStrength else 0, strength)
+	shakeTime = SHAKE_DURATION
+end
+
+pcall(RunService.UnbindFromRenderStep, RunService, SHAKE_STEP)
+RunService:BindToRenderStep(SHAKE_STEP, Enum.RenderPriority.Camera.Value + 2, function(dt)
+	if shakeTime <= 0 then
+		return
+	end
+	shakeTime -= dt
+	local amount = shakeStrength * math.max(shakeTime, 0) / SHAKE_DURATION * 0.05
+	camera.CFrame *= CFrame.Angles((math.random() - 0.5) * amount, (math.random() - 0.5) * amount, 0)
+end)
+
+-- Aterrizajes fuertes -------------------------------------------------------------
+
+local peakFallSpeed = 0
+
+humanoid.StateChanged:Connect(function(_, newState)
+	if newState == Enum.HumanoidStateType.Landed then
+		if peakFallSpeed > Config.HardLandingSpeed then
+			local strength = math.clamp((peakFallSpeed - Config.HardLandingSpeed) / 80, 0.3, 1)
+			shake(strength)
+			Sfx.play("Land", 1, 0.4 + 0.4 * strength)
+		end
+		peakFallSpeed = 0
+	end
+end)
+
+-- Sonidos de acciones -------------------------------------------------------------
+
+character:GetAttributeChangedSignal("ParkourState"):Connect(function()
+	if character:GetAttribute("ParkourState") == "Slide" then
+		Sfx.play("Slide", 1.1, 0.5)
+	end
+end)
+
+character:GetAttributeChangedSignal("WallJumpTick"):Connect(function()
+	Sfx.play("WallJump", 1.3, 0.6)
+end)
+
+-- Bucle principal ------------------------------------------------------------------
+
+local connection = RunService.Heartbeat:Connect(function(dt)
+	local state = character:GetAttribute("ParkourState")
+	local speed = horizontalSpeed()
+	local airborne = humanoid.FloorMaterial == Enum.Material.Air
+
+	-- Pose
+	if rootJoint then
+		poseOffset = poseOffset:Lerp(targetPose(state), math.min(dt * 12, 1))
+		rootJoint.C0 = poseOffset * baseC0
+	end
+
+	trail.Enabled = speed > Config.TrailSpeed or state == "WallRun"
+	dust.Enabled = state == "Slide" and not airborne
+
+	if airborne then
+		peakFallSpeed = math.max(peakFallSpeed, -root.AssemblyLinearVelocity.Y)
+	end
+
+	if wind then
+		local alpha = math.clamp(
+			(speed - Config.BaseWalkSpeed) / (Config.WallRunSpeed - Config.BaseWalkSpeed),
+			0,
+			1
+		)
+		wind.Volume = 0.5 * alpha
+		wind.PlaybackSpeed = 0.8 + 0.4 * alpha
+	end
+end)
+
+local function cleanup()
+	connection:Disconnect()
+	pcall(RunService.UnbindFromRenderStep, RunService, SHAKE_STEP)
+	if wind then
+		wind:Destroy()
+		wind = nil
+	end
+end
+
+humanoid.Died:Connect(cleanup)
+character.Destroying:Connect(cleanup)
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="LocalScript" referent="13">
           <Properties>
             <string name="Name">Movement</string>
             <string name="Source"><![CDATA[-- Movimiento de parkour: momentum al correr, deslizamiento, wall run y wall jump.
@@ -821,6 +1113,13 @@ local wallRunStart = 0
 local lastWallRunEnd = -math.huge
 local lastWall: Instance? = nil
 local cameraTilt = 0
+
+-- Estado visible para el script de efectos (Effects): "None", "Slide" o "WallRun"
+local function setParkourState(name: string)
+	if character:GetAttribute("ParkourState") ~= name then
+		character:SetAttribute("ParkourState", name)
+	end
+end
 
 local function isGrounded(): boolean
 	return humanoid.FloorMaterial ~= Enum.Material.Air
@@ -903,6 +1202,8 @@ local function tryStartWallRun()
 	end
 
 	wallRunning = true
+	-- 1 = pared a la derecha, -1 = pared a la izquierda
+	character:SetAttribute("WallSide", if hit.Normal:Dot(root.CFrame.RightVector) < 0 then 1 else -1)
 	wallNormal = hit.Normal
 	wallTangent = tangent
 	wallRunStart = now
@@ -938,11 +1239,25 @@ UserInputService.JumpRequest:Connect(function()
 		+ Vector3.new(0, Config.WallJumpUpForce, 0)
 		+ wallTangent * Config.WallRunSpeed * 0.8
 	humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+	character:SetAttribute("WallJumpTick", (character:GetAttribute("WallJumpTick") or 0) + 1)
 end)
 
 -- Bucle principal ------------------------------------------------------------
 
 local connection = RunService.Heartbeat:Connect(function(dt)
+	-- Congelado durante la cuenta atrás
+	if player:GetAttribute("Frozen") then
+		stopWallRun()
+		slideEndTime = 0
+		currentSpeed = Config.BaseWalkSpeed
+		humanoid.WalkSpeed = 0
+		humanoid.JumpPower = 0
+		humanoid.CameraOffset = Vector3.zero
+		setParkourState("None")
+		return
+	end
+	humanoid.JumpPower = Config.JumpPower
+
 	local now = os.clock()
 	local moving = humanoid.MoveDirection.Magnitude > 0.1
 
@@ -962,11 +1277,14 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 	-- Velocidad final según la acción actual
 	if wallRunning then
 		humanoid.WalkSpeed = Config.WallRunSpeed
+		setParkourState("WallRun")
 	elseif now < slideEndTime then
 		local remaining = (slideEndTime - now) / Config.SlideDuration
 		humanoid.WalkSpeed = currentSpeed + Config.SlideBoost * remaining
+		setParkourState("Slide")
 	else
 		humanoid.WalkSpeed = currentSpeed
+		setParkourState("None")
 		if humanoid.CameraOffset ~= Vector3.zero then
 			humanoid.CameraOffset = Vector3.zero
 		end
@@ -1018,26 +1336,29 @@ humanoid.Died:Connect(cleanup)
         </Item>
       </Item>
     </Item>
-    <Item class="StarterPlayerScripts" referent="12">
+    <Item class="StarterPlayerScripts" referent="14">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="13">
+      <Item class="Folder" referent="15">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="LocalScript" referent="14">
+        <Item class="LocalScript" referent="16">
           <Properties>
             <string name="Name">RaceHUD</string>
             <string name="Source"><![CDATA[-- Interfaz de la carrera: cronómetro, checkpoints, mejor tiempo y mensajes.
 
 local ContextActionService = game:GetService("ContextActionService")
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
-local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Shared = ReplicatedStorage:WaitForChild("Shared")
+local Config = require(Shared:WaitForChild("Config"))
+local Sfx = require(Shared:WaitForChild("Sfx"))
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
@@ -1100,6 +1421,17 @@ local popupLabel = label({
 	TextStrokeTransparency = 1,
 })
 
+local countdownLabel = label({
+	Name = "Countdown",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Position = UDim2.fromScale(0.5, 0.45),
+	Size = UDim2.new(0, 260, 0, 160),
+	Text = "",
+	Visible = false,
+})
+local countdownScale = Instance.new("UIScale")
+countdownScale.Parent = countdownLabel
+
 label({
 	Name = "Controls",
 	AnchorPoint = Vector2.new(0, 1),
@@ -1130,6 +1462,53 @@ local function showPopup(text: string, color: Color3?)
 	popupTween:Play()
 end
 
+-- Cuenta atrás -------------------------------------------------------------------
+
+local countdownToken: {}? = nil
+
+local function bumpCountdown(text: string, color: Color3)
+	countdownLabel.Visible = true
+	countdownLabel.Text = text
+	countdownLabel.TextColor3 = color
+	countdownLabel.TextTransparency = 0
+	countdownLabel.TextStrokeTransparency = 0.3
+	countdownScale.Scale = 1.6
+	TweenService:Create(countdownScale, TweenInfo.new(0.35, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+end
+
+local function hideCountdown()
+	countdownToken = nil
+	countdownLabel.Visible = false
+end
+
+-- Confeti al batir un récord
+local function confetti()
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return
+	end
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 80, 80)),
+		ColorSequenceKeypoint.new(0.33, Color3.fromRGB(255, 210, 0)),
+		ColorSequenceKeypoint.new(0.66, Color3.fromRGB(0, 255, 140)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 170, 255)),
+	})
+	emitter.EmissionDirection = Enum.NormalId.Top
+	emitter.Speed = NumberRange.new(20, 35)
+	emitter.SpreadAngle = Vector2.new(60, 60)
+	emitter.Lifetime = NumberRange.new(1, 2)
+	emitter.Acceleration = Vector3.new(0, -30, 0)
+	emitter.Size = NumberSequence.new(0.6, 0.2)
+	emitter.LightEmission = 0.5
+	emitter.Rate = 0
+	emitter.Parent = root
+	emitter:Emit(80)
+	Debris:AddItem(emitter, 3)
+end
+
 -- Estado de la carrera ----------------------------------------------------------
 
 local running = false
@@ -1147,7 +1526,36 @@ RunService.RenderStepped:Connect(function()
 	end
 end)
 
+remotes:WaitForChild("RaceCountdown").OnClientEvent:Connect(function(seconds: number)
+	running = false
+	timerLabel.Text = Config.FormatTime(0)
+	timerLabel.TextColor3 = Color3.new(1, 1, 1)
+	checkpointLabel.Text = "¡Prepárate!"
+
+	local token = {}
+	countdownToken = token
+	for i = seconds, 1, -1 do
+		if countdownToken ~= token then
+			return
+		end
+		bumpCountdown(tostring(i), Color3.new(1, 1, 1))
+		Sfx.play("Countdown", 0.8)
+		task.wait(1)
+	end
+end)
+
 remotes:WaitForChild("RaceStarted").OnClientEvent:Connect(function(total: number)
+	-- "¡YA!" llega del servidor, así el tiempo empieza a la vez en los dos lados
+	local token = {}
+	countdownToken = token
+	bumpCountdown("¡YA!", Color3.fromRGB(0, 255, 140))
+	Sfx.play("Go", 1.4, 0.8)
+	task.delay(0.8, function()
+		if countdownToken == token then
+			hideCountdown()
+		end
+	end)
+
 	running = true
 	startTime = os.clock()
 	timerLabel.TextColor3 = Color3.new(1, 1, 1)
@@ -1157,6 +1565,7 @@ end)
 remotes:WaitForChild("CheckpointReached").OnClientEvent:Connect(function(index: number, total: number, split: number)
 	checkpointLabel.Text = string.format("Checkpoint %d/%d", index, total)
 	showPopup(string.format("Checkpoint %d  ·  %s", index, Config.FormatTime(split)), Color3.fromRGB(0, 255, 140))
+	Sfx.play("Checkpoint", 1.2)
 end)
 
 remotes:WaitForChild("RaceFinished").OnClientEvent:Connect(function(time: number, best: number, isRecord: boolean)
@@ -1166,14 +1575,18 @@ remotes:WaitForChild("RaceFinished").OnClientEvent:Connect(function(time: number
 	if isRecord then
 		timerLabel.TextColor3 = Color3.fromRGB(255, 210, 0)
 		showPopup("¡NUEVO RÉCORD!  " .. Config.FormatTime(time), Color3.fromRGB(255, 210, 0))
+		Sfx.play("Record", 1, 0.8)
+		confetti()
 	else
 		local diff = time - best
 		showPopup(string.format("%s  (+%.3f)", Config.FormatTime(time), diff), Color3.fromRGB(255, 120, 120))
+		Sfx.play("Finish", 1, 0.5)
 	end
 end)
 
 remotes:WaitForChild("RaceCancelled").OnClientEvent:Connect(function(reason: string?)
 	running = false
+	hideCountdown()
 	timerLabel.Text = Config.FormatTime(0)
 	timerLabel.TextColor3 = Color3.new(1, 1, 1)
 	checkpointLabel.Text = "Cruza la salida azul para empezar"

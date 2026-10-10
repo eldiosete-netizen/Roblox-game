@@ -10,6 +10,12 @@ Juego de parkour contrarreloj: corre, desliza y salta por las paredes para conse
   - Wall run: salta hacia una pared mientras corres y avanzas por ella
   - Wall jump: pulsa `Espacio` mientras corres por la pared
   - La cámara se abre (FOV) con la velocidad y se inclina en el wall run
+- **Sensaciones**
+  - Cuenta atrás 3-2-1-¡YA! en la salida (te quedas quieto en la línea)
+  - Poses: el cuerpo se inclina al deslizar y al correr por la pared
+  - Rastro de colores a alta velocidad y polvo al deslizar
+  - Sonidos: cuenta atrás, checkpoints, récord, deslizar, wall jump, aterrizaje y viento según la velocidad
+  - Temblor de cámara al caer desde muy alto y confeti al batir tu récord
 - **Carrera**: salida, checkpoints en orden, meta y cronómetro medido por el servidor (anti-trampas básico)
 - **Caídas**: si caes, vuelves al último checkpoint sin parar el tiempo
 - **Récords**: mejor tiempo guardado (DataStore), en la tabla de jugadores y en un ranking Top 10
@@ -56,6 +62,10 @@ Crea estos objetos en Studio y pega el código de cada archivo:
 ### Guardar récords
 En Studio: **Home > Game Settings > Security > Enable Studio Access to API Services**. Sin esto el juego funciona igual, pero los récords solo duran la sesión.
 
+## Sonidos
+
+Los sonidos usan archivos que vienen con Roblox. Si alguno no suena, o quieres otros, busca sonidos en la **Creator Store** (Toolbox > Audio), copia su ID y ponlo en `Sounds` dentro de `Config.luau` así: `"rbxassetid://123456789"`.
+
 ## Hacer tu propio mapa
 
 Si en `Workspace` existe una carpeta llamada `Course`, el juego la usa en lugar de generar el mapa de prueba. Tiene que tener:
@@ -63,7 +73,7 @@ Si en `Workspace` existe una carpeta llamada `Course`, el juego la usa en lugar 
 ```
 Course
 ├── Spawn          (SpawnLocation)
-├── Start          (Part, CanCollide desactivado: empieza el tiempo)
+├── Start          (Part, CanCollide desactivado, con la cara frontal mirando al circuito: inicia la cuenta atrás)
 ├── Finish         (Part, CanCollide desactivado: para el tiempo)
 ├── Checkpoints    (Folder)
 │   ├── 1          (Part con el atributo Index = 1)

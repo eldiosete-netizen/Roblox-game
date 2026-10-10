@@ -19,6 +19,7 @@ local function newRemote(name: string): RemoteEvent
 	return remote
 end
 
+local RaceCountdown = newRemote("RaceCountdown") -- (seconds)
 local RaceStarted = newRemote("RaceStarted") -- (totalCheckpoints)
 local CheckpointReached = newRemote("CheckpointReached") -- (index, total, splitTime)
 local RaceFinished = newRemote("RaceFinished") -- (time, bestTime, isNewRecord)
@@ -48,6 +49,7 @@ end
 
 type State = {
 	racing: boolean,
+	countdownToken: {}?,
 	startTime: number,
 	nextCheckpoint: number,
 	respawnCFrame: CFrame,
@@ -60,6 +62,11 @@ local states: { [Player]: State } = {}
 
 local function spawnCFrame(): CFrame
 	return spawnPart.CFrame * CFrame.new(0, spawnPart.Size.Y / 2 + 3, 0)
+end
+
+-- Justo delante de la línea de salida (la cara frontal de "Start" mira hacia el circuito)
+local function startCFrame(): CFrame
+	return startGate.CFrame * CFrame.new(0, -startGate.Size.Y / 2 + 3, -4)
 end
 
 local function checkpointCFrame(cp: BasePart): CFrame
@@ -98,15 +105,29 @@ local function setBest(player: Player, state: State, seconds: number)
 	end
 end
 
-local function resetState(state: State)
+local function setFrozen(player: Player, frozen: boolean)
+	player:SetAttribute("Frozen", frozen)
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if root then
+		root.Anchored = frozen
+	end
+end
+
+local function resetState(player: Player, state: State)
+	if state.countdownToken then
+		state.countdownToken = nil
+		setFrozen(player, false)
+	end
 	state.racing = false
 	state.nextCheckpoint = 1
 	state.respawnCFrame = spawnCFrame()
 end
 
-local function startRace(player: Player)
+-- Al cruzar la salida: te coloca en la línea, te congela y cuenta 3, 2, 1...
+local function beginCountdown(player: Player)
 	local state = states[player]
-	if not state then
+	if not state or state.countdownToken then
 		return
 	end
 	local now = os.clock()
@@ -114,11 +135,28 @@ local function startRace(player: Player)
 		return
 	end
 	state.lastStart = now
-	state.racing = true
-	state.startTime = now
+
+	local token = {}
+	state.countdownToken = token
+	state.racing = false
 	state.nextCheckpoint = 1
-	state.respawnCFrame = spawnCFrame()
-	RaceStarted:FireClient(player, totalCheckpoints)
+	state.respawnCFrame = startCFrame()
+
+	teleport(player, startCFrame())
+	setFrozen(player, true)
+	RaceCountdown:FireClient(player, Config.CountdownSeconds)
+
+	task.delay(Config.CountdownSeconds, function()
+		if states[player] ~= state or state.countdownToken ~= token then
+			return -- cancelada (reinicio, muerte o salida del juego)
+		end
+		state.countdownToken = nil
+		setFrozen(player, false)
+		state.racing = true
+		state.startTime = os.clock()
+		state.lastStart = state.startTime
+		RaceStarted:FireClient(player, totalCheckpoints)
+	end)
 end
 
 local function reachCheckpoint(player: Player, index: number)
@@ -141,7 +179,7 @@ local function finishRace(player: Player)
 	end
 
 	local elapsed = os.clock() - state.startTime
-	resetState(state)
+	resetState(player, state)
 
 	if elapsed < Config.MinValidTime then
 		RaceCancelled:FireClient(player, "Tiempo no válido")
@@ -167,7 +205,7 @@ end
 startGate.Touched:Connect(function(hit)
 	local player = playerFromHit(hit)
 	if player then
-		startRace(player)
+		beginCountdown(player)
 	end
 end)
 
@@ -212,7 +250,7 @@ RequestRestart.OnServerEvent:Connect(function(player)
 		return
 	end
 	state.lastRestart = now
-	resetState(state)
+	resetState(player, state)
 	RaceCancelled:FireClient(player, nil)
 	teleport(player, spawnCFrame())
 end)
@@ -240,7 +278,10 @@ local function onPlayerAdded(player: Player)
 
 	-- Si muere en mitad de la carrera, reaparece en su último checkpoint
 	player.CharacterAdded:Connect(function(character)
-		if state.racing then
+		if state.countdownToken then
+			resetState(player, state)
+			RaceCancelled:FireClient(player, nil)
+		elseif state.racing then
 			character:WaitForChild("HumanoidRootPart")
 			task.wait()
 			teleport(player, state.respawnCFrame)
