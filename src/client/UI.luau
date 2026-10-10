@@ -131,6 +131,9 @@ function UI.onOpen(name: string, callback: () -> ())
 end
 
 function UI.open(name: string)
+	if not panels[name] then
+		return
+	end
 	for other, panel in panels do
 		panel.frame.Visible = other == name
 	end

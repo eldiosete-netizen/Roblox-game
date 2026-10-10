@@ -21,3 +21,12 @@ SettingsMenu.start()
 StartMenu.start()
 Obstacles.start()
 Ghost.start()
+
+-- El servidor puede pedir abrir un menú (p. ej. al tocar un portal bloqueado)
+local Remotes = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Remotes"))
+local UI = require(Client:WaitForChild("UI"))
+Remotes.OpenMenu.OnClientEvent:Connect(function(panel: string)
+	if typeof(panel) == "string" then
+		UI.open(panel)
+	end
+end)

@@ -12,7 +12,7 @@ Juego de parkour contrarreloj: corre, desliza y salta por las paredes para conse
 **Contenido**
 - Lobby decorado: plaza con anillos holográficos, farolas, árboles, bancos, ciudad de neón de fondo
 - Portales a cada mapa y una pared de rankings detrás del spawn
-- 5 mapas: Tutorial, Ciudad, Neón, Selva y Cielo (VIP)
+- 5 mapas, cada uno más largo y difícil que el anterior: Tutorial y Ciudad (gratis), Neón (150 monedas), Selva (400 monedas) y Cielo (solo VIP, el más largo y difícil)
 - Obstáculos: plataformas móviles, trampolines, tirolinas y zonas de gravedad baja
 - Medallas por mapa: bronce, plata, oro y desarrollador
 
@@ -61,9 +61,10 @@ Si copias los scripts a mano en otro proyecto, desactiva **Workspace > Streaming
 
 1. **Guardar datos**: en Studio, **Home > Game Settings > Security > Enable Studio Access to API Services**. Sin esto el juego funciona, pero nada se guarda entre sesiones.
 2. **Game Pass**: crea los pases en el [Creator Hub](https://create.roblox.com) (tu juego > Monetization > Passes) y pon sus IDs en `src/shared/Config.luau`: el VIP en `VipGamePassId` y los de monedas en `CoinPasses` (x2, x3, x5 y x10). Los pases sin ID salen como "Próximamente".
-3. **Medallas**: los tiempos de medalla de cada mapa son una estimación. Juega cada mapa y ajústalos en `src/server/CourseBuilder.luau` (atributos `Bronze`, `Silver`, `Gold` y `Dev`). Lo normal es poner como medalla de desarrollador tu mejor tiempo.
-4. **Carreras en vivo**: necesitan 2 jugadores. Para probar solo en Studio, pon `LiveRace.MinPlayers = 1` en `Config.luau`.
-5. **Sonidos**: usan archivos que vienen con Roblox. Si alguno no suena, busca otro en la Creator Store (Toolbox > Audio) y pon su ID en `Sounds` dentro de `Config.luau` así: `"rbxassetid://123456789"`.
+3. **Medallas**: los tiempos de medalla se calculan solos según la longitud de cada mapa. Si quieres fijarlos a mano, añade `Bronze`, `Silver`, `Gold` y `Dev` en los atributos del mapa en `src/server/CourseBuilder.luau`. Lo normal es poner como medalla de desarrollador tu mejor tiempo.
+4. **Precio de los niveles**: atributo `Price` de cada mapa en `CourseBuilder.luau` (0 = gratis).
+5. **Carreras en vivo**: necesitan 2 jugadores. Para probar solo en Studio, pon `LiveRace.MinPlayers = 1` en `Config.luau`.
+6. **Sonidos**: usan archivos que vienen con Roblox. Si alguno no suena, busca otro en la Creator Store (Toolbox > Audio) y pon su ID en `Sounds` dentro de `Config.luau` así: `"rbxassetid://123456789"`.
 
 ## Estructura del código
 
@@ -87,6 +88,7 @@ src/server/      (ServerScriptService.Server)
   Economy        monedas, XP y niveles
   Shop           tienda de cosméticos y rastros
   Passes         Game Pass: VIP y multiplicadores de monedas
+  MapUnlocks     niveles que se desbloquean con monedas
 src/client/      (StarterPlayerScripts.Client)
   Main           arranque del cliente
   HUD, MapMenu, ShopMenu, SettingsMenu, StartMenu, LiveRaceUI   interfaz
@@ -115,6 +117,9 @@ La forma más fácil es añadir una entrada a `CourseBuilder.Definitions` en `sr
 | `m:moving(largo, ancho, altura, desplazamiento, periodo, fase)` | plataforma móvil |
 | `m:zipline(largo, bajada, altura)` | tirolina |
 | `m:lowGravity(largo, altura)` | zona de gravedad baja |
+| `m:zigzag(cantidad, hueco, tamaño, separación, altura, subida)` | plataformas alternando izquierda/derecha |
+| `m:stairs(cantidad, hueco, tamaño, altura, subida)` | escalera de plataformas |
+| `m:beam(largo, ancho, altura)` | viga estrecha para hacer equilibrio |
 | `m:sign(texto, altura)` | cartel flotante |
 | `m:finish(altura)` | meta |
 

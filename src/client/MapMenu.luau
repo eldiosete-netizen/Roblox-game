@@ -86,6 +86,11 @@ function MapMenu.refresh()
 		local color = folder:GetAttribute("Color") or UI.Colors.Accent
 		local mapData = ClientState.mapData(folder.Name)
 		local earned = mapData and mapData.medal or 0
+		local data = ClientState.data
+		local price = folder:GetAttribute("Price") or 0
+		local locked = price > 0
+			and not folder:GetAttribute("Vip")
+			and not (data and data.unlockedMaps and data.unlockedMaps[folder.Name])
 
 		local card = UI.new("Frame", {
 			Name = folder.Name,
@@ -113,11 +118,13 @@ function MapMenu.refresh()
 			Size = UDim2.new(1, -180, 0, 26),
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = UI.Colors.Muted,
-			Text = string.format(
-				"Mejor: %s   ·   Medalla: %s",
-				Config.FormatTime(mapData and mapData.best),
-				if earned > 0 then Config.MedalInfo(earned).name else "ninguna"
-			),
+			Text = if locked
+				then string.format("🔒 Bloqueado   ·   Precio: %d monedas", price)
+				else string.format(
+					"Mejor: %s   ·   Medalla: %s",
+					Config.FormatTime(mapData and mapData.best),
+					if earned > 0 then Config.MedalInfo(earned).name else "ninguna"
+				),
 		})
 		medalRow(card, folder, earned)
 
@@ -129,6 +136,32 @@ function MapMenu.refresh()
 		})
 		local action = function()
 			play(folder.Name)
+		end
+		if locked then
+			-- Primer clic: pide confirmación; segundo clic: compra el nivel
+			local lockedText = string.format("🔒 %d 🪙", price)
+			playButton.Text = lockedText
+			playButton.BackgroundColor3 = UI.Colors.Gold
+			playButton.TextColor3 = UI.Colors.Background
+			local confirming = false
+			action = function()
+				if not confirming then
+					confirming = true
+					playButton.Text = "¿Desbloquear?"
+					task.delay(3, function()
+						if confirming and playButton.Parent then
+							confirming = false
+							playButton.Text = lockedText
+						end
+					end)
+					return
+				end
+				confirming = false
+				local ok, message = Remotes.UnlockMap:InvokeServer(folder.Name)
+				if message then
+					HUD.popup(message, if ok then UI.Colors.Good else UI.Colors.Bad)
+				end
+			end
 		end
 		for _, decorate in cardDecorators do
 			action = decorate(card, folder, playButton) or action

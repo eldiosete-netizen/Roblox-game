@@ -165,10 +165,13 @@ function RaceService.enterMap(player: Player, mapId: string, mode: string?): (bo
 	if not state or not map then
 		return false, "Mapa no encontrado"
 	end
-	for _, check in enterChecks do
-		local ok, message = check(player, map)
-		if not ok then
-			return false, message
+	-- En las carreras en vivo se puede correr cualquier mapa (aunque no esté desbloqueado)
+	if mode ~= "live" then
+		for _, check in enterChecks do
+			local ok, message = check(player, map)
+			if not ok then
+				return false, message
+			end
 		end
 	end
 	local now = os.clock()
@@ -406,6 +409,7 @@ function RaceService.init()
 						local ok, message = RaceService.enterMap(player, mapId, "solo")
 						if not ok and message then
 							Remotes.Notify:FireClient(player, message)
+							Remotes.OpenMenu:FireClient(player, "Maps")
 						end
 					end
 				end)

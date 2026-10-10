@@ -3,7 +3,7 @@
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "2.4",
+	Version = "2.5",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -121,10 +121,13 @@ local Config = {
 	-- Guardado
 	DataStores = {
 		Player = "PlayerData_v1",
-		TimesPrefix = "Times_v1_",
-		Ghosts = "Ghosts_v1",
+		TimesPrefix = "Times_v2_", -- v2: mapas rediseñados (los rankings empiezan de cero)
+		Ghosts = "Ghosts_v2",
 	},
 	AutosaveInterval = 120,
+	-- Si cambian los recorridos, sube este número: se borran récords y medallas
+	-- de los mapas (no las monedas, el nivel ni las compras)
+	MapDataVersion = 2,
 }
 
 -- Medallas de mejor a peor. El tiempo de cada una se define por mapa.

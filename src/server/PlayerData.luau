@@ -16,6 +16,8 @@ local DEFAULT = {
 	coins = 0,
 	xp = 0,
 	maps = {}, -- [mapId] = { best = segundos, splits = {...}, medal = rango, runs = n }
+	mapsVersion = 0,
+	unlockedMaps = {}, -- [mapId] = true (niveles comprados con monedas)
 	owned = {}, -- [itemId] = true
 	equipped = {}, -- [tipo] = itemId
 	settings = {},
@@ -85,6 +87,11 @@ function PlayerData.load(player: Player): { [string]: any }
 		data = {}
 	end
 	reconcile(data, DEFAULT)
+	-- Los recorridos cambiaron: los récords antiguos ya no valen
+	if data.mapsVersion ~= Config.MapDataVersion then
+		data.maps = {}
+		data.mapsVersion = Config.MapDataVersion
+	end
 
 	profiles[player] = { data = data, canSave = canSave, dirty = false }
 	session[player] = session[player] or {}

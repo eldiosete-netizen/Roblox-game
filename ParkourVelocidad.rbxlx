@@ -105,7 +105,7 @@ return Catalog
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "2.4",
+	Version = "2.5",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -223,10 +223,13 @@ local Config = {
 	-- Guardado
 	DataStores = {
 		Player = "PlayerData_v1",
-		TimesPrefix = "Times_v1_",
-		Ghosts = "Ghosts_v1",
+		TimesPrefix = "Times_v2_", -- v2: mapas rediseñados (los rankings empiezan de cero)
+		Ghosts = "Ghosts_v2",
 	},
 	AutosaveInterval = 120,
+	-- Si cambian los recorridos, sube este número: se borran récords y medallas
+	-- de los mapas (no las monedas, el nivel ni las compras)
+	MapDataVersion = 2,
 }
 
 -- Medallas de mejor a peor. El tiempo de cada una se define por mapa.
@@ -304,6 +307,7 @@ local EVENTS = {
 	"GhostData", -- (mapId, encoded?)
 	"SubmitGhost", -- (mapId, encoded)
 	"LiveRaceUpdate", -- (status)
+	"OpenMenu", -- (panelName) el servidor pide abrir un menú (p. ej. al tocar un portal bloqueado)
 }
 
 local FUNCTIONS = {
@@ -312,6 +316,7 @@ local FUNCTIONS = {
 	"Purchase", -- (itemId) -> ok, message
 	"Equip", -- (itemId) -> ok, message
 	"GetLeaderboard", -- (mapId) -> { all = entries, week = entries }
+	"UnlockMap", -- (mapId) -> ok, message
 }
 
 local Remotes = {}
@@ -713,6 +718,46 @@ function MapBuilder:zipline(length: number, drop: number, h: number)
 	self.cursor += length
 end
 
+-- Plataformas pequeñas alternando a izquierda y derecha, subiendo "rise" cada una
+function MapBuilder:zigzag(count: number, gap: number, size: number, spread: number, h: number, rise: number?): number
+	local height = h
+	for i = 1, count do
+		self:gap(gap)
+		height += rise or 0
+		self:block(size, size, height, if i % 2 == 1 then spread else -spread)
+	end
+	return height
+end
+
+-- Escalera de plataformas
+function MapBuilder:stairs(count: number, gap: number, size: number, h: number, rise: number): number
+	local height = h
+	for i = 1, count do
+		self:gap(gap)
+		height += rise
+		self:block(size, size, height, if i % 2 == 1 then -3 else 3)
+	end
+	return height
+end
+
+-- Viga estrecha para hacer equilibrio
+function MapBuilder:beam(length: number, width: number, h: number): BasePart
+	local part = self:block(length, width, h, 0, self.theme.wall)
+	part.Name = "Beam"
+	return part
+end
+
+-- Tiempos de medalla según la longitud del mapa (si la definición no los trae)
+function MapBuilder:autoMedals()
+	local length = self.cursor
+	local speeds = { Dev = 31, Gold = 26, Silver = 21, Bronze = 15 } -- studs por segundo de media
+	for medal, speed in speeds do
+		if self.folder:GetAttribute(medal) == nil then
+			self.folder:SetAttribute(medal, math.floor(length / speed * 10 + 0.5) / 10)
+		end
+	end
+end
+
 function MapBuilder:sign(text: string, h: number)
 	local anchor = newPart("Part", {
 		Name = "Sign",
@@ -804,51 +849,50 @@ CourseBuilder.Definitions = {
 		end,
 	},
 	{
+		-- Nivel 1: gratis y corto, para aprender
 		id = "ciudad",
 		theme = THEMES.Ciudad,
 		attributes = {
 			DisplayName = "Ciudad",
 			Order = 1,
 			Color = THEMES.Ciudad.accent,
-			Bronze = 35,
-			Silver = 25,
-			Gold = 19,
-			Dev = 15,
+			Price = 0,
 		},
 		build = function(m)
 			m:start()
 			m:runway(40)
-			for _, jump in { { 4, 1 }, { -4, 3 }, { 3, 5 }, { -3, 3 }, { 0, 1 } } do
-				m:gap(7)
-				m:block(8, 8, jump[2], jump[1])
-			end
+			m:zigzag(5, 7, 8, 4, 0, 1)
 			m:gap(7)
 			m:checkpoint(m:block(16, 16, 0))
-			m:wallRun(-1, 34)
-			m:checkpoint(m:wallRun(1, 34))
-			m:runway(40)
+			m:wallRun(-1, 30)
+			m:checkpoint(m:wallRun(1, 30))
+			m:runway(30)
 			m:ramp(16, 6)
-			m:gap(18)
-			m:checkpoint(m:block(20, 14, 2))
-			for _, step in { { -4, 6 }, { 4, 10 }, { -4, 14 }, { 2, 18 } } do
-				m:gap(5)
-				m:block(6, 6, step[2], step[1])
-			end
+			m:gap(16)
+			m:block(20, 14, 2)
+			local h = m:stairs(4, 5, 6, 2, 4)
 			m:gap(6)
-			m:finish(20)
+			m:beam(30, 3, h)
+			m:gap(7)
+			m:checkpoint(m:block(16, 16, h))
+			h = m:zigzag(5, 7, 8, 4, h, -3)
+			m:gap(6)
+			m:trampoline(h)
+			m:gap(10)
+			m:checkpoint(m:block(16, 12, h + 18))
+			m:gap(6)
+			m:finish(h + 20)
 		end,
 	},
 	{
+		-- Nivel 2: plataformas móviles, trampolines y gravedad baja
 		id = "neon",
 		theme = THEMES.Neon,
 		attributes = {
 			DisplayName = "Neón",
 			Order = 2,
 			Color = THEMES.Neon.accent,
-			Bronze = 45,
-			Silver = 33,
-			Gold = 26,
-			Dev = 21,
+			Price = 150,
 		},
 		build = function(m)
 			m:start()
@@ -866,7 +910,6 @@ CourseBuilder.Definitions = {
 			m:block(10, 10, 16)
 			m:gap(8)
 			m:block(10, 10, 14)
-			-- Gravedad baja: saltos largos
 			m:lowGravity(76, 0)
 			m:gap(20)
 			m:block(8, 8, 20)
@@ -876,25 +919,39 @@ CourseBuilder.Definitions = {
 			m:checkpoint(m:block(14, 14, 8))
 			m:wallRun(1, 34, 8)
 			m:checkpoint(m:wallRun(-1, 34, 8))
+			for i = 1, 3 do
+				m:gap(6)
+				m:moving(8, 8, 8, Vector3.new(8, 0, 0), 2.5, (i - 1) * 0.33)
+			end
+			m:gap(6)
+			m:block(12, 12, 8)
 			m:gap(6)
 			m:moving(8, 8, 8, Vector3.new(0, 10, 0), 4) -- ascensor
 			m:gap(6)
 			m:block(10, 10, 16)
 			m:gap(6)
-			m:finish(18)
+			m:beam(24, 3, 16)
+			m:gap(7)
+			m:checkpoint(m:block(14, 14, 16))
+			local h = m:zigzag(5, 7, 6, 4, 16, 2)
+			m:lowGravity(60, h)
+			m:gap(22)
+			m:block(8, 8, h + 6)
+			m:gap(22)
+			m:checkpoint(m:block(14, 14, h + 2))
+			m:gap(6)
+			m:finish(h + 4)
 		end,
 	},
 	{
+		-- Nivel 3: tirolinas, wall runs encadenados y saltos de precisión
 		id = "selva",
 		theme = THEMES.Selva,
 		attributes = {
 			DisplayName = "Selva",
 			Order = 3,
 			Color = THEMES.Selva.accent,
-			Bronze = 50,
-			Silver = 38,
-			Gold = 30,
-			Dev = 24,
+			Price = 400,
 		},
 		build = function(m)
 			m:start()
@@ -902,14 +959,10 @@ CourseBuilder.Definitions = {
 			m:ramp(16, 6)
 			m:gap(16)
 			m:block(16, 14, 2)
+			local h = m:stairs(3, 5, 6, 2, 4)
 			m:gap(5)
-			m:block(6, 6, 6, -3)
-			m:gap(5)
-			m:block(6, 6, 10, 3)
-			m:gap(5)
-			m:checkpoint(m:block(12, 12, 14))
-			-- Tirolina: salta hacia el cable para engancharte
-			m:zipline(90, 12, 14)
+			m:checkpoint(m:block(12, 12, h))
+			m:zipline(90, 12, h)
 			m:block(20, 16, 0)
 			m:gap(6)
 			m:trampoline(0)
@@ -926,11 +979,32 @@ CourseBuilder.Definitions = {
 			m:ramp(16, 6, 12)
 			m:gap(18)
 			m:block(20, 14, 14)
+			m:zigzag(6, 8, 5, 5, 14)
+			m:gap(8)
+			m:checkpoint(m:block(14, 14, 14))
+			m:zipline(80, 10, 14)
+			m:block(16, 14, 2)
 			m:gap(6)
-			m:finish(16)
+			m:trampoline(2)
+			m:gap(12)
+			m:block(10, 10, 20)
+			m:wallRun(1, 36, 20)
+			m:checkpoint(m:wallRun(-1, 36, 20))
+			m:gap(6)
+			m:beam(30, 2.5, 20)
+			m:gap(8)
+			m:moving(8, 8, 20, Vector3.new(0, 8, 0), 3.5)
+			m:gap(6)
+			m:block(10, 10, 26)
+			h = m:stairs(2, 6, 8, 26, 4)
+			m:gap(6)
+			m:checkpoint(m:block(14, 14, h))
+			m:gap(6)
+			m:finish(h + 2)
 		end,
 	},
 	{
+		-- Nivel VIP: el más largo y difícil, con todo combinado
 		id = "cielo",
 		theme = THEMES.Cielo,
 		attributes = {
@@ -938,38 +1012,75 @@ CourseBuilder.Definitions = {
 			Order = 4,
 			Color = THEMES.Cielo.accent,
 			Vip = true,
-			Bronze = 55,
-			Silver = 42,
-			Gold = 33,
-			Dev = 27,
+			Price = 0,
 		},
 		build = function(m)
 			m:start()
 			m:runway(40)
-			for _, jump in { { 4, 1 }, { -4, 3 }, { 4, 5 } } do
-				m:gap(9)
-				m:block(6, 6, jump[2], jump[1])
-			end
+			local h = m:zigzag(4, 9, 5, 5, 0, 1.5)
 			m:gap(9)
-			m:checkpoint(m:block(12, 12, 3))
-			m:wallRun(1, 40, 3)
-			m:checkpoint(m:wallRun(-1, 40, 3))
-			m:trampoline(3)
+			m:checkpoint(m:block(12, 12, h))
+			m:wallRun(1, 40, h)
+			m:checkpoint(m:wallRun(-1, 40, h))
+			m:trampoline(h)
 			m:gap(12)
-			m:block(16, 10, 24)
-			m:zipline(80, 14, 24)
-			m:block(16, 14, 10)
-			m:lowGravity(56, 10)
+			m:block(12, 10, h + 22)
+			m:zipline(80, 14, h + 22)
+			m:checkpoint(m:block(16, 14, h + 8))
+			h += 8
+			m:lowGravity(76, h)
 			m:gap(22)
-			m:block(6, 6, 16)
+			m:block(5, 5, h + 6)
 			m:gap(22)
-			m:block(6, 6, 10)
-			m:gap(8)
-			m:checkpoint(m:block(14, 14, 8))
-			m:runway(30, 8)
-			m:ramp(16, 6, 8)
+			m:block(5, 5, h)
+			m:gap(22)
+			m:checkpoint(m:block(14, 14, h - 2))
+			h -= 2
+			for i = 1, 3 do
+				m:gap(6)
+				m:moving(6, 6, h, Vector3.new(10, 0, 0), 2.2, (i - 1) * 0.33)
+			end
+			m:gap(6)
+			m:block(10, 10, h)
+			m:gap(6)
+			m:beam(36, 2, h)
+			m:gap(6)
+			m:block(10, 10, h)
+			m:wallRun(1, 46, h)
+			m:checkpoint(m:wallRun(-1, 46, h))
+			m:runway(30, h)
+			m:ramp(16, 8, h)
 			m:gap(18)
-			m:finish(12)
+			m:block(12, 12, h + 4)
+			h = m:zigzag(6, 8, 4, 5, h + 4, 2)
+			m:gap(8)
+			m:checkpoint(m:block(12, 12, h))
+			m:gap(6)
+			m:moving(8, 8, h, Vector3.new(0, 10, 0), 4) -- ascensor
+			m:gap(6)
+			m:block(8, 8, h + 8)
+			h += 8
+			m:trampoline(h)
+			m:gap(12)
+			m:block(12, 10, h + 22)
+			m:zipline(100, 20, h + 22)
+			h += 2
+			m:checkpoint(m:block(16, 14, h))
+			m:lowGravity(60, h)
+			m:gap(22)
+			m:block(5, 5, h + 6)
+			m:gap(22)
+			m:block(8, 8, h + 2)
+			for i = 1, 2 do
+				m:gap(6)
+				m:moving(6, 6, h + 2, Vector3.new(8, 0, 0), 2, (i - 1) * 0.5)
+			end
+			m:gap(6)
+			m:beam(24, 2, h + 2)
+			m:gap(8)
+			m:checkpoint(m:block(12, 12, h + 2))
+			m:gap(7)
+			m:finish(h + 4)
 		end,
 	},
 }
@@ -1422,6 +1533,9 @@ function CourseBuilder.buildAll(): (Folder, Folder)
 	for i, definition in CourseBuilder.Definitions do
 		local builder = MapBuilder.new(mapsFolder, definition.id, definition.attributes, i * Config.MapSpacing, definition.theme)
 		definition.build(builder)
+		if not definition.attributes.Tutorial then
+			builder:autoMedals()
+		end
 		table.insert(built, builder.folder)
 	end
 
@@ -2574,6 +2688,7 @@ local LiveRace = require(Server:WaitForChild("LiveRace"))
 local Economy = require(Server:WaitForChild("Economy"))
 local Shop = require(Server:WaitForChild("Shop"))
 local Passes = require(Server:WaitForChild("Passes"))
+local MapUnlocks = require(Server:WaitForChild("MapUnlocks"))
 
 local Config = require(Shared:WaitForChild("Config"))
 
@@ -2608,6 +2723,7 @@ LiveRace.init()
 Economy.init()
 Shop.init()
 Passes.init()
+MapUnlocks.init()
 
 -- Tabla de jugadores (leaderstats)
 local function countMedals(data): number
@@ -2649,6 +2765,70 @@ end)
       </Item>
       <Item class="ModuleScript" referent="16">
         <Properties>
+          <string name="Name">MapUnlocks</string>
+          <string name="Source"><![CDATA[-- Niveles que se desbloquean con monedas (atributo Price de cada mapa).
+-- El tutorial y los mapas gratis están siempre abiertos; el mapa VIP se abre
+-- con el pase VIP (ver Passes), no con monedas.
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
+
+local Economy = require(script.Parent:WaitForChild("Economy"))
+local Maps = require(script.Parent:WaitForChild("Maps"))
+local PlayerData = require(script.Parent:WaitForChild("PlayerData"))
+local RaceService = require(script.Parent:WaitForChild("RaceService"))
+
+local MapUnlocks = {}
+
+function MapUnlocks.isUnlocked(player: Player, map: Maps.MapInfo): boolean
+	if map.tutorial or map.vip or map.price <= 0 then
+		return true
+	end
+	local data = PlayerData.get(player)
+	return data ~= nil and data.unlockedMaps[map.id] == true
+end
+
+local function unlock(player: Player, mapId: any): (boolean, string?)
+	local map = typeof(mapId) == "string" and Maps.get(mapId)
+	local data = PlayerData.get(player)
+	if not map or not data then
+		return false, "Nivel no válido"
+	end
+	if map.vip then
+		return false, "⭐ Este nivel se desbloquea con el pase VIP"
+	end
+	if MapUnlocks.isUnlocked(player, map) then
+		return false, "Ya tienes este nivel"
+	end
+	if data.coins < map.price then
+		return false, string.format("Te faltan %d monedas", map.price - data.coins)
+	end
+	if not Economy.spend(player, map.price) then
+		return false, "No tienes suficientes monedas"
+	end
+	data.unlockedMaps[map.id] = true
+	PlayerData.sync(player)
+	return true, string.format("🔓 ¡%s desbloqueado!", map.name)
+end
+
+function MapUnlocks.init()
+	Remotes.UnlockMap.OnServerInvoke = unlock
+
+	RaceService.addEnterCheck(function(player, map)
+		if MapUnlocks.isUnlocked(player, map) then
+			return true, nil
+		end
+		return false, string.format("🔒 %s cuesta %d monedas: desbloquéalo en el menú de Mapas", map.name, map.price)
+	end)
+end
+
+return MapUnlocks
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="17">
+        <Properties>
           <string name="Name">Maps</string>
           <string name="Source"><![CDATA[-- Registro de mapas: lee Workspace/Maps (o los genera) y el lobby.
 
@@ -2664,6 +2844,7 @@ export type MapInfo = {
 	order: number,
 	vip: boolean,
 	tutorial: boolean,
+	price: number, -- monedas para desbloquearlo (0 = gratis)
 	medals: { [string]: number },
 	startPad: BasePart,
 	startGate: BasePart,
@@ -2710,6 +2891,7 @@ local function parse(folder: Folder): MapInfo?
 		order = folder:GetAttribute("Order") or 0,
 		vip = folder:GetAttribute("Vip") == true,
 		tutorial = folder:GetAttribute("Tutorial") == true,
+		price = folder:GetAttribute("Price") or 0,
 		medals = medals,
 		startPad = startPad,
 		startGate = startGate,
@@ -2775,7 +2957,7 @@ return Maps
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">Passes</string>
           <string name="Source"><![CDATA[-- Game Pass: VIP y multiplicadores de monedas (x2, x3, x5, x10).
@@ -2938,7 +3120,7 @@ return Passes
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="18">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">PlayerData</string>
           <string name="Source"><![CDATA[-- Datos guardados de cada jugador (DataStore) y sincronización con su cliente.
@@ -2959,6 +3141,8 @@ local DEFAULT = {
 	coins = 0,
 	xp = 0,
 	maps = {}, -- [mapId] = { best = segundos, splits = {...}, medal = rango, runs = n }
+	mapsVersion = 0,
+	unlockedMaps = {}, -- [mapId] = true (niveles comprados con monedas)
 	owned = {}, -- [itemId] = true
 	equipped = {}, -- [tipo] = itemId
 	settings = {},
@@ -3028,6 +3212,11 @@ function PlayerData.load(player: Player): { [string]: any }
 		data = {}
 	end
 	reconcile(data, DEFAULT)
+	-- Los recorridos cambiaron: los récords antiguos ya no valen
+	if data.mapsVersion ~= Config.MapDataVersion then
+		data.maps = {}
+		data.mapsVersion = Config.MapDataVersion
+	end
 
 	profiles[player] = { data = data, canSave = canSave, dirty = false }
 	session[player] = session[player] or {}
@@ -3169,7 +3358,7 @@ return PlayerData
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="19">
+      <Item class="ModuleScript" referent="20">
         <Properties>
           <string name="Name">RaceService</string>
           <string name="Source"><![CDATA[-- Lógica de las carreras: entrar en mapas, cuenta atrás, checkpoints, meta,
@@ -3339,10 +3528,13 @@ function RaceService.enterMap(player: Player, mapId: string, mode: string?): (bo
 	if not state or not map then
 		return false, "Mapa no encontrado"
 	end
-	for _, check in enterChecks do
-		local ok, message = check(player, map)
-		if not ok then
-			return false, message
+	-- En las carreras en vivo se puede correr cualquier mapa (aunque no esté desbloqueado)
+	if mode ~= "live" then
+		for _, check in enterChecks do
+			local ok, message = check(player, map)
+			if not ok then
+				return false, message
+			end
 		end
 	end
 	local now = os.clock()
@@ -3580,6 +3772,7 @@ function RaceService.init()
 						local ok, message = RaceService.enterMap(player, mapId, "solo")
 						if not ok and message then
 							Remotes.Notify:FireClient(player, message)
+							Remotes.OpenMenu:FireClient(player, "Maps")
 						end
 					end
 				end)
@@ -3628,7 +3821,7 @@ return RaceService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="20">
+      <Item class="ModuleScript" referent="21">
         <Properties>
           <string name="Name">Shop</string>
           <string name="Source"><![CDATA[-- Tienda de cosméticos y efectos visibles para todos (rastro).
@@ -3790,19 +3983,19 @@ return Shop
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="21">
+  <Item class="StarterPlayer" referent="22">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterCharacterScripts" referent="22">
+    <Item class="StarterCharacterScripts" referent="23">
       <Properties>
         <string name="Name">StarterCharacterScripts</string>
       </Properties>
-      <Item class="Folder" referent="23">
+      <Item class="Folder" referent="24">
         <Properties>
           <string name="Name">Character</string>
         </Properties>
-        <Item class="LocalScript" referent="24">
+        <Item class="LocalScript" referent="25">
           <Properties>
             <string name="Name">Effects</string>
             <string name="Source"><![CDATA[-- Efectos visuales y de sonido del movimiento: poses, partículas de salto y
@@ -4008,7 +4201,7 @@ character.Destroying:Connect(cleanup)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="25">
+        <Item class="LocalScript" referent="26">
           <Properties>
             <string name="Name">Movement</string>
             <string name="Source"><![CDATA[-- Movimiento de parkour: momentum al correr, deslizamiento, wall run y wall jump.
@@ -4307,15 +4500,15 @@ humanoid.Died:Connect(cleanup)
         </Item>
       </Item>
     </Item>
-    <Item class="StarterPlayerScripts" referent="26">
+    <Item class="StarterPlayerScripts" referent="27">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="27">
+      <Item class="Folder" referent="28">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">ClientState</string>
             <string name="Source"><![CDATA[-- Datos del jugador en el cliente (los envía el servidor con DataSync).
@@ -4389,7 +4582,7 @@ return ClientState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="29">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">Ghost</string>
             <string name="Source"><![CDATA[-- Modo fantasma: graba tu carrera y, en el siguiente intento, muestra una
@@ -4589,7 +4782,7 @@ return Ghost
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="31">
           <Properties>
             <string name="Name">HUD</string>
             <string name="Source"><![CDATA[-- Interfaz de la carrera: cronómetro, parciales, medallas, cuenta atrás,
@@ -5088,7 +5281,7 @@ return HUD
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">LiveRaceUI</string>
             <string name="Source"><![CDATA[-- Interfaz de la carrera en vivo: banner con el estado y botón para unirse.
@@ -5186,7 +5379,7 @@ return LiveRaceUI
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="32">
+        <Item class="LocalScript" referent="33">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[-- Arranque del cliente: pone en marcha la interfaz y los sistemas locales.
@@ -5212,10 +5405,19 @@ SettingsMenu.start()
 StartMenu.start()
 Obstacles.start()
 Ghost.start()
+
+-- El servidor puede pedir abrir un menú (p. ej. al tocar un portal bloqueado)
+local Remotes = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Remotes"))
+local UI = require(Client:WaitForChild("UI"))
+Remotes.OpenMenu.OnClientEvent:Connect(function(panel: string)
+	if typeof(panel) == "string" then
+		UI.open(panel)
+	end
+end)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">MapMenu</string>
             <string name="Source"><![CDATA[-- Selector de mapas: tu mejor tiempo, medallas conseguidas y tiempos objetivo.
@@ -5306,6 +5508,11 @@ function MapMenu.refresh()
 		local color = folder:GetAttribute("Color") or UI.Colors.Accent
 		local mapData = ClientState.mapData(folder.Name)
 		local earned = mapData and mapData.medal or 0
+		local data = ClientState.data
+		local price = folder:GetAttribute("Price") or 0
+		local locked = price > 0
+			and not folder:GetAttribute("Vip")
+			and not (data and data.unlockedMaps and data.unlockedMaps[folder.Name])
 
 		local card = UI.new("Frame", {
 			Name = folder.Name,
@@ -5333,11 +5540,13 @@ function MapMenu.refresh()
 			Size = UDim2.new(1, -180, 0, 26),
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextColor3 = UI.Colors.Muted,
-			Text = string.format(
-				"Mejor: %s   ·   Medalla: %s",
-				Config.FormatTime(mapData and mapData.best),
-				if earned > 0 then Config.MedalInfo(earned).name else "ninguna"
-			),
+			Text = if locked
+				then string.format("🔒 Bloqueado   ·   Precio: %d monedas", price)
+				else string.format(
+					"Mejor: %s   ·   Medalla: %s",
+					Config.FormatTime(mapData and mapData.best),
+					if earned > 0 then Config.MedalInfo(earned).name else "ninguna"
+				),
 		})
 		medalRow(card, folder, earned)
 
@@ -5349,6 +5558,32 @@ function MapMenu.refresh()
 		})
 		local action = function()
 			play(folder.Name)
+		end
+		if locked then
+			-- Primer clic: pide confirmación; segundo clic: compra el nivel
+			local lockedText = string.format("🔒 %d 🪙", price)
+			playButton.Text = lockedText
+			playButton.BackgroundColor3 = UI.Colors.Gold
+			playButton.TextColor3 = UI.Colors.Background
+			local confirming = false
+			action = function()
+				if not confirming then
+					confirming = true
+					playButton.Text = "¿Desbloquear?"
+					task.delay(3, function()
+						if confirming and playButton.Parent then
+							confirming = false
+							playButton.Text = lockedText
+						end
+					end)
+					return
+				end
+				confirming = false
+				local ok, message = Remotes.UnlockMap:InvokeServer(folder.Name)
+				if message then
+					HUD.popup(message, if ok then UI.Colors.Good else UI.Colors.Bad)
+				end
+			end
 		end
 		for _, decorate in cardDecorators do
 			action = decorate(card, folder, playButton) or action
@@ -5406,7 +5641,7 @@ return MapMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">Obstacles</string>
             <string name="Source"><![CDATA[-- Obstáculos especiales (los simula cada cliente para que vayan suaves):
@@ -5717,7 +5952,7 @@ return Obstacles
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">RankingsMenu</string>
             <string name="Source"><![CDATA[-- Panel de rankings: top de cada mapa (histórico y semanal) desde cualquier sitio.
@@ -5875,7 +6110,7 @@ return RankingsMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">SettingsMenu</string>
             <string name="Source"><![CDATA[-- Ajustes del jugador (se guardan en su cuenta).
@@ -5963,7 +6198,7 @@ return SettingsMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="37">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">ShopMenu</string>
             <string name="Source"><![CDATA[-- Tienda: rastros, efectos de salto y de deslizamiento (con monedas) y
@@ -6364,7 +6599,7 @@ return ShopMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="38">
+        <Item class="ModuleScript" referent="39">
           <Properties>
             <string name="Name">StartMenu</string>
             <string name="Source"><![CDATA[-- Menú de inicio: aparece al entrar al juego.
@@ -6501,7 +6736,7 @@ return StartMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="39">
+        <Item class="ModuleScript" referent="40">
           <Properties>
             <string name="Name">UI</string>
             <string name="Source"><![CDATA[-- Pequeña librería para crear la interfaz con un estilo común.
@@ -6637,6 +6872,9 @@ function UI.onOpen(name: string, callback: () -> ())
 end
 
 function UI.open(name: string)
+	if not panels[name] then
+		return
+	end
 	for other, panel in panels do
 		panel.frame.Visible = other == name
 	end
@@ -6682,7 +6920,7 @@ return UI
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="40">
+  <Item class="Workspace" referent="41">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>

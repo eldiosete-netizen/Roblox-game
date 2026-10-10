@@ -223,6 +223,46 @@ function MapBuilder:zipline(length: number, drop: number, h: number)
 	self.cursor += length
 end
 
+-- Plataformas pequeñas alternando a izquierda y derecha, subiendo "rise" cada una
+function MapBuilder:zigzag(count: number, gap: number, size: number, spread: number, h: number, rise: number?): number
+	local height = h
+	for i = 1, count do
+		self:gap(gap)
+		height += rise or 0
+		self:block(size, size, height, if i % 2 == 1 then spread else -spread)
+	end
+	return height
+end
+
+-- Escalera de plataformas
+function MapBuilder:stairs(count: number, gap: number, size: number, h: number, rise: number): number
+	local height = h
+	for i = 1, count do
+		self:gap(gap)
+		height += rise
+		self:block(size, size, height, if i % 2 == 1 then -3 else 3)
+	end
+	return height
+end
+
+-- Viga estrecha para hacer equilibrio
+function MapBuilder:beam(length: number, width: number, h: number): BasePart
+	local part = self:block(length, width, h, 0, self.theme.wall)
+	part.Name = "Beam"
+	return part
+end
+
+-- Tiempos de medalla según la longitud del mapa (si la definición no los trae)
+function MapBuilder:autoMedals()
+	local length = self.cursor
+	local speeds = { Dev = 31, Gold = 26, Silver = 21, Bronze = 15 } -- studs por segundo de media
+	for medal, speed in speeds do
+		if self.folder:GetAttribute(medal) == nil then
+			self.folder:SetAttribute(medal, math.floor(length / speed * 10 + 0.5) / 10)
+		end
+	end
+end
+
 function MapBuilder:sign(text: string, h: number)
 	local anchor = newPart("Part", {
 		Name = "Sign",
@@ -314,51 +354,50 @@ CourseBuilder.Definitions = {
 		end,
 	},
 	{
+		-- Nivel 1: gratis y corto, para aprender
 		id = "ciudad",
 		theme = THEMES.Ciudad,
 		attributes = {
 			DisplayName = "Ciudad",
 			Order = 1,
 			Color = THEMES.Ciudad.accent,
-			Bronze = 35,
-			Silver = 25,
-			Gold = 19,
-			Dev = 15,
+			Price = 0,
 		},
 		build = function(m)
 			m:start()
 			m:runway(40)
-			for _, jump in { { 4, 1 }, { -4, 3 }, { 3, 5 }, { -3, 3 }, { 0, 1 } } do
-				m:gap(7)
-				m:block(8, 8, jump[2], jump[1])
-			end
+			m:zigzag(5, 7, 8, 4, 0, 1)
 			m:gap(7)
 			m:checkpoint(m:block(16, 16, 0))
-			m:wallRun(-1, 34)
-			m:checkpoint(m:wallRun(1, 34))
-			m:runway(40)
+			m:wallRun(-1, 30)
+			m:checkpoint(m:wallRun(1, 30))
+			m:runway(30)
 			m:ramp(16, 6)
-			m:gap(18)
-			m:checkpoint(m:block(20, 14, 2))
-			for _, step in { { -4, 6 }, { 4, 10 }, { -4, 14 }, { 2, 18 } } do
-				m:gap(5)
-				m:block(6, 6, step[2], step[1])
-			end
+			m:gap(16)
+			m:block(20, 14, 2)
+			local h = m:stairs(4, 5, 6, 2, 4)
 			m:gap(6)
-			m:finish(20)
+			m:beam(30, 3, h)
+			m:gap(7)
+			m:checkpoint(m:block(16, 16, h))
+			h = m:zigzag(5, 7, 8, 4, h, -3)
+			m:gap(6)
+			m:trampoline(h)
+			m:gap(10)
+			m:checkpoint(m:block(16, 12, h + 18))
+			m:gap(6)
+			m:finish(h + 20)
 		end,
 	},
 	{
+		-- Nivel 2: plataformas móviles, trampolines y gravedad baja
 		id = "neon",
 		theme = THEMES.Neon,
 		attributes = {
 			DisplayName = "Neón",
 			Order = 2,
 			Color = THEMES.Neon.accent,
-			Bronze = 45,
-			Silver = 33,
-			Gold = 26,
-			Dev = 21,
+			Price = 150,
 		},
 		build = function(m)
 			m:start()
@@ -376,7 +415,6 @@ CourseBuilder.Definitions = {
 			m:block(10, 10, 16)
 			m:gap(8)
 			m:block(10, 10, 14)
-			-- Gravedad baja: saltos largos
 			m:lowGravity(76, 0)
 			m:gap(20)
 			m:block(8, 8, 20)
@@ -386,25 +424,39 @@ CourseBuilder.Definitions = {
 			m:checkpoint(m:block(14, 14, 8))
 			m:wallRun(1, 34, 8)
 			m:checkpoint(m:wallRun(-1, 34, 8))
+			for i = 1, 3 do
+				m:gap(6)
+				m:moving(8, 8, 8, Vector3.new(8, 0, 0), 2.5, (i - 1) * 0.33)
+			end
+			m:gap(6)
+			m:block(12, 12, 8)
 			m:gap(6)
 			m:moving(8, 8, 8, Vector3.new(0, 10, 0), 4) -- ascensor
 			m:gap(6)
 			m:block(10, 10, 16)
 			m:gap(6)
-			m:finish(18)
+			m:beam(24, 3, 16)
+			m:gap(7)
+			m:checkpoint(m:block(14, 14, 16))
+			local h = m:zigzag(5, 7, 6, 4, 16, 2)
+			m:lowGravity(60, h)
+			m:gap(22)
+			m:block(8, 8, h + 6)
+			m:gap(22)
+			m:checkpoint(m:block(14, 14, h + 2))
+			m:gap(6)
+			m:finish(h + 4)
 		end,
 	},
 	{
+		-- Nivel 3: tirolinas, wall runs encadenados y saltos de precisión
 		id = "selva",
 		theme = THEMES.Selva,
 		attributes = {
 			DisplayName = "Selva",
 			Order = 3,
 			Color = THEMES.Selva.accent,
-			Bronze = 50,
-			Silver = 38,
-			Gold = 30,
-			Dev = 24,
+			Price = 400,
 		},
 		build = function(m)
 			m:start()
@@ -412,14 +464,10 @@ CourseBuilder.Definitions = {
 			m:ramp(16, 6)
 			m:gap(16)
 			m:block(16, 14, 2)
+			local h = m:stairs(3, 5, 6, 2, 4)
 			m:gap(5)
-			m:block(6, 6, 6, -3)
-			m:gap(5)
-			m:block(6, 6, 10, 3)
-			m:gap(5)
-			m:checkpoint(m:block(12, 12, 14))
-			-- Tirolina: salta hacia el cable para engancharte
-			m:zipline(90, 12, 14)
+			m:checkpoint(m:block(12, 12, h))
+			m:zipline(90, 12, h)
 			m:block(20, 16, 0)
 			m:gap(6)
 			m:trampoline(0)
@@ -436,11 +484,32 @@ CourseBuilder.Definitions = {
 			m:ramp(16, 6, 12)
 			m:gap(18)
 			m:block(20, 14, 14)
+			m:zigzag(6, 8, 5, 5, 14)
+			m:gap(8)
+			m:checkpoint(m:block(14, 14, 14))
+			m:zipline(80, 10, 14)
+			m:block(16, 14, 2)
 			m:gap(6)
-			m:finish(16)
+			m:trampoline(2)
+			m:gap(12)
+			m:block(10, 10, 20)
+			m:wallRun(1, 36, 20)
+			m:checkpoint(m:wallRun(-1, 36, 20))
+			m:gap(6)
+			m:beam(30, 2.5, 20)
+			m:gap(8)
+			m:moving(8, 8, 20, Vector3.new(0, 8, 0), 3.5)
+			m:gap(6)
+			m:block(10, 10, 26)
+			h = m:stairs(2, 6, 8, 26, 4)
+			m:gap(6)
+			m:checkpoint(m:block(14, 14, h))
+			m:gap(6)
+			m:finish(h + 2)
 		end,
 	},
 	{
+		-- Nivel VIP: el más largo y difícil, con todo combinado
 		id = "cielo",
 		theme = THEMES.Cielo,
 		attributes = {
@@ -448,38 +517,75 @@ CourseBuilder.Definitions = {
 			Order = 4,
 			Color = THEMES.Cielo.accent,
 			Vip = true,
-			Bronze = 55,
-			Silver = 42,
-			Gold = 33,
-			Dev = 27,
+			Price = 0,
 		},
 		build = function(m)
 			m:start()
 			m:runway(40)
-			for _, jump in { { 4, 1 }, { -4, 3 }, { 4, 5 } } do
-				m:gap(9)
-				m:block(6, 6, jump[2], jump[1])
-			end
+			local h = m:zigzag(4, 9, 5, 5, 0, 1.5)
 			m:gap(9)
-			m:checkpoint(m:block(12, 12, 3))
-			m:wallRun(1, 40, 3)
-			m:checkpoint(m:wallRun(-1, 40, 3))
-			m:trampoline(3)
+			m:checkpoint(m:block(12, 12, h))
+			m:wallRun(1, 40, h)
+			m:checkpoint(m:wallRun(-1, 40, h))
+			m:trampoline(h)
 			m:gap(12)
-			m:block(16, 10, 24)
-			m:zipline(80, 14, 24)
-			m:block(16, 14, 10)
-			m:lowGravity(56, 10)
+			m:block(12, 10, h + 22)
+			m:zipline(80, 14, h + 22)
+			m:checkpoint(m:block(16, 14, h + 8))
+			h += 8
+			m:lowGravity(76, h)
 			m:gap(22)
-			m:block(6, 6, 16)
+			m:block(5, 5, h + 6)
 			m:gap(22)
-			m:block(6, 6, 10)
-			m:gap(8)
-			m:checkpoint(m:block(14, 14, 8))
-			m:runway(30, 8)
-			m:ramp(16, 6, 8)
+			m:block(5, 5, h)
+			m:gap(22)
+			m:checkpoint(m:block(14, 14, h - 2))
+			h -= 2
+			for i = 1, 3 do
+				m:gap(6)
+				m:moving(6, 6, h, Vector3.new(10, 0, 0), 2.2, (i - 1) * 0.33)
+			end
+			m:gap(6)
+			m:block(10, 10, h)
+			m:gap(6)
+			m:beam(36, 2, h)
+			m:gap(6)
+			m:block(10, 10, h)
+			m:wallRun(1, 46, h)
+			m:checkpoint(m:wallRun(-1, 46, h))
+			m:runway(30, h)
+			m:ramp(16, 8, h)
 			m:gap(18)
-			m:finish(12)
+			m:block(12, 12, h + 4)
+			h = m:zigzag(6, 8, 4, 5, h + 4, 2)
+			m:gap(8)
+			m:checkpoint(m:block(12, 12, h))
+			m:gap(6)
+			m:moving(8, 8, h, Vector3.new(0, 10, 0), 4) -- ascensor
+			m:gap(6)
+			m:block(8, 8, h + 8)
+			h += 8
+			m:trampoline(h)
+			m:gap(12)
+			m:block(12, 10, h + 22)
+			m:zipline(100, 20, h + 22)
+			h += 2
+			m:checkpoint(m:block(16, 14, h))
+			m:lowGravity(60, h)
+			m:gap(22)
+			m:block(5, 5, h + 6)
+			m:gap(22)
+			m:block(8, 8, h + 2)
+			for i = 1, 2 do
+				m:gap(6)
+				m:moving(6, 6, h + 2, Vector3.new(8, 0, 0), 2, (i - 1) * 0.5)
+			end
+			m:gap(6)
+			m:beam(24, 2, h + 2)
+			m:gap(8)
+			m:checkpoint(m:block(12, 12, h + 2))
+			m:gap(7)
+			m:finish(h + 4)
 		end,
 	},
 }
@@ -932,6 +1038,9 @@ function CourseBuilder.buildAll(): (Folder, Folder)
 	for i, definition in CourseBuilder.Definitions do
 		local builder = MapBuilder.new(mapsFolder, definition.id, definition.attributes, i * Config.MapSpacing, definition.theme)
 		definition.build(builder)
+		if not definition.attributes.Tutorial then
+			builder:autoMedals()
+		end
 		table.insert(built, builder.folder)
 	end
 

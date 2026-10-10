@@ -16,6 +16,7 @@ local LiveRace = require(Server:WaitForChild("LiveRace"))
 local Economy = require(Server:WaitForChild("Economy"))
 local Shop = require(Server:WaitForChild("Shop"))
 local Passes = require(Server:WaitForChild("Passes"))
+local MapUnlocks = require(Server:WaitForChild("MapUnlocks"))
 
 local Config = require(Shared:WaitForChild("Config"))
 
@@ -50,6 +51,7 @@ LiveRace.init()
 Economy.init()
 Shop.init()
 Passes.init()
+MapUnlocks.init()
 
 -- Tabla de jugadores (leaderstats)
 local function countMedals(data): number

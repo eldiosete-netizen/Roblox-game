@@ -22,6 +22,7 @@ local EVENTS = {
 	"GhostData", -- (mapId, encoded?)
 	"SubmitGhost", -- (mapId, encoded)
 	"LiveRaceUpdate", -- (status)
+	"OpenMenu", -- (panelName) el servidor pide abrir un menú (p. ej. al tocar un portal bloqueado)
 }
 
 local FUNCTIONS = {
@@ -30,6 +31,7 @@ local FUNCTIONS = {
 	"Purchase", -- (itemId) -> ok, message
 	"Equip", -- (itemId) -> ok, message
 	"GetLeaderboard", -- (mapId) -> { all = entries, week = entries }
+	"UnlockMap", -- (mapId) -> ok, message
 }
 
 local Remotes = {}
