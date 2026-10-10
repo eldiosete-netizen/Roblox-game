@@ -126,6 +126,12 @@ function UI.panel(gui: ScreenGui, name: string, title: string, size: UDim2): (Fr
 	return frame, content
 end
 
+-- Registra un panel con diseño propio (para que se abra y cierre como los demás)
+function UI.registerPanel(name: string, frame: GuiObject)
+	frame.Visible = false
+	panels[name] = { frame = frame }
+end
+
 function UI.onOpen(name: string, callback: () -> ())
 	panels[name].onOpen = callback
 end
