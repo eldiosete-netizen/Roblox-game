@@ -1,7 +1,8 @@
 <!doctype html>
 <!--
   Icono y miniatura del juego. Se dibujan con SVG para poder cambiar el título
-  fácilmente. Abre ?mode=icon (512x512) o ?mode=thumb (1920x1080).
+  fácilmente. Abre ?mode=icon (512x512), ?mode=thumb (1920x1080) o
+  ?mode=vip (512x512, imagen del Game Pass VIP).
 -->
 <html>
 <head>
@@ -18,7 +19,7 @@ const TITLE = "PARKOUR";
 const SUBTITLE = "DE VELOCIDAD";
 
 const params = new URLSearchParams(location.search);
-const mode = params.get("mode") === "thumb" ? "thumb" : "icon";
+const mode = ["thumb", "vip"].includes(params.get("mode")) ? params.get("mode") : "icon";
 const W = mode === "thumb" ? 1920 : 512;
 const H = mode === "thumb" ? 1080 : 512;
 
@@ -75,6 +76,16 @@ function defs() {
       <stop offset="0" stop-color="#3fd8ff" stop-opacity="0.45"/>
       <stop offset="0.6" stop-color="#3fd8ff" stop-opacity="0.15"/>
       <stop offset="1" stop-color="#3fd8ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6b8"/>
+      <stop offset="0.45" stop-color="#ffd34d"/>
+      <stop offset="1" stop-color="#e08a00"/>
+    </linearGradient>
+    <radialGradient id="vipGlow" cx="0.5" cy="0.45" r="0.55">
+      <stop offset="0" stop-color="#ffcf4d" stop-opacity="0.55"/>
+      <stop offset="0.5" stop-color="#ff3fb4" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#ff3fb4" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="vignette" cx="0.5" cy="0.5" r="0.75">
       <stop offset="0.6" stop-color="#000" stop-opacity="0"/>
@@ -285,7 +296,70 @@ function icon() {
   </svg>`;
 }
 
-document.getElementById("root").innerHTML = mode === "thumb" ? thumbnail() : icon();
+// Corona dorada centrada en (cx, cy)
+function crown(cx, cy, w) {
+  const h = w * 0.62;
+  const left = cx - w / 2, right = cx + w / 2, top = cy - h / 2, bottom = cy + h / 2;
+  const band = h * 0.24;
+  const points = [
+    [left, bottom - band], [left - w * 0.04, top + h * 0.12], [left + w * 0.24, top + h * 0.48],
+    [cx, top - h * 0.04], [right - w * 0.24, top + h * 0.48], [right + w * 0.04, top + h * 0.12],
+    [right, bottom - band],
+  ].map(p => p.join(",")).join(" ");
+  const gem = (x, y, r, color) =>
+    `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" stroke="#0b0726" stroke-width="5"/>
+     <circle cx="${x - r * 0.3}" cy="${y - r * 0.3}" r="${r * 0.3}" fill="#ffffff" opacity="0.7"/>`;
+  return `
+  <g filter="url(#shadow)">
+    <g filter="url(#neon)">
+      <polygon points="${points}" fill="none" stroke="#ffd34d" stroke-width="10" stroke-linejoin="round"/>
+      <rect x="${left}" y="${bottom - band}" width="${w}" height="${band}" rx="10" fill="none" stroke="#ffd34d" stroke-width="10"/>
+    </g>
+    <polygon points="${points}" fill="url(#gold)" stroke="#0b0726" stroke-width="10" stroke-linejoin="round"/>
+    <rect x="${left}" y="${bottom - band}" width="${w}" height="${band}" rx="10" fill="url(#gold)" stroke="#0b0726" stroke-width="10"/>
+    ${gem(cx, bottom - band / 2, band * 0.3, "#ff3fb4")}
+    ${gem(left + w * 0.2, bottom - band / 2, band * 0.22, "#00d4ff")}
+    ${gem(right - w * 0.2, bottom - band / 2, band * 0.22, "#00d4ff")}
+    ${gem(left - w * 0.04, top + h * 0.12, w * 0.05, "#a855ff")}
+    ${gem(cx, top - h * 0.04, w * 0.06, "#ff3fb4")}
+    ${gem(right + w * 0.04, top + h * 0.12, w * 0.05, "#a855ff")}
+  </g>`;
+}
+
+// Destello de cuatro puntas
+function sparkle(x, y, r, color) {
+  return `<path d="M ${x} ${y - r} Q ${x} ${y} ${x + r} ${y} Q ${x} ${y} ${x} ${y + r} Q ${x} ${y} ${x - r} ${y} Q ${x} ${y} ${x} ${y - r} Z"
+    fill="${color}" filter="url(#neon)"/>`;
+}
+
+function vip() {
+  const rays = [];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const x2 = 256 + Math.cos(a) * 400, y2 = 230 + Math.sin(a) * 400;
+    const a2 = a + Math.PI / 32;
+    const x3 = 256 + Math.cos(a2) * 400, y3 = 230 + Math.sin(a2) * 400;
+    rays.push(`<polygon points="256,230 ${x2},${y2} ${x3},${y3}" fill="#ffd34d" opacity="0.07"/>`);
+  }
+  return `
+  <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    ${defs()}
+    <rect width="${W}" height="${H}" fill="#140a2e"/>
+    <rect width="${W}" height="${H}" fill="url(#sky)" opacity="0.6"/>
+    ${rays.join("")}
+    <circle cx="256" cy="230" r="250" fill="url(#vipGlow)"/>
+    ${sparkle(110, 120, 22, "#ffffff")}
+    ${sparkle(408, 105, 16, "#ffd34d")}
+    ${sparkle(400, 300, 12, "#7fe9ff")}
+    ${sparkle(118, 318, 14, "#ff7ad9")}
+    ${crown(256, 205, 230)}
+    ${titleText(256, 410, 132, "VIP", "url(#gold)", "#ff3fb4")}
+    <rect width="${W}" height="${H}" fill="url(#vignette)"/>
+  </svg>`;
+}
+
+const RENDER = { icon, thumb: thumbnail, vip };
+document.getElementById("root").innerHTML = RENDER[mode]();
 </script>
 </body>
 </html>
