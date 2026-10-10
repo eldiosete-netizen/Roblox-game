@@ -1,0 +1,291 @@
+<!doctype html>
+<!--
+  Icono y miniatura del juego. Se dibujan con SVG para poder cambiar el título
+  fácilmente. Abre ?mode=icon (512x512) o ?mode=thumb (1920x1080).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; background: #000; }
+  svg { display: block; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const TITLE = "PARKOUR";
+const SUBTITLE = "DE VELOCIDAD";
+
+const params = new URLSearchParams(location.search);
+const mode = params.get("mode") === "thumb" ? "thumb" : "icon";
+const W = mode === "thumb" ? 1920 : 512;
+const H = mode === "thumb" ? 1080 : 512;
+
+// Números pseudoaleatorios repetibles (siempre sale la misma ciudad)
+let seed = 7;
+function rand() {
+  seed = (seed * 16807) % 2147483647;
+  return (seed - 1) / 2147483646;
+}
+
+const NEON = ["#00d4ff", "#ff3fb4", "#a855ff", "#ffd34d"];
+
+function defs() {
+  return `
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b0726"/>
+      <stop offset="0.45" stop-color="#3a1460"/>
+      <stop offset="0.75" stop-color="#9b2c7a"/>
+      <stop offset="1" stop-color="#ff7a7a"/>
+    </linearGradient>
+    <linearGradient id="sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff27a"/>
+      <stop offset="0.55" stop-color="#ff9a4d"/>
+      <stop offset="1" stop-color="#ff3f8e"/>
+    </linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c0838"/>
+      <stop offset="1" stop-color="#05020f"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.55" stop-color="#bff6ff"/>
+      <stop offset="1" stop-color="#3fd8ff"/>
+    </linearGradient>
+    <linearGradient id="subtitle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe68a"/>
+      <stop offset="1" stop-color="#ff8a3d"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#00d4ff" stop-opacity="0.95"/>
+      <stop offset="0.5" stop-color="#a855ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff3fb4" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="speed" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff7ad9" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff7ad9" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="runnerGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3fd8ff" stop-opacity="0.45"/>
+      <stop offset="0.6" stop-color="#3fd8ff" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#3fd8ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.5" r="0.75">
+      <stop offset="0.6" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.55"/>
+    </radialGradient>
+    <filter id="neon" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="b1"/>
+      <feGaussianBlur stdDeviation="10" result="b2"/>
+      <feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.6"/>
+    </filter>
+  </defs>`;
+}
+
+// Sol de atardecer con franjas (estilo retro)
+function sun(cx, cy, r) {
+  let stripes = "";
+  const count = 7;
+  for (let i = 0; i < count; i++) {
+    const t = i / count;
+    const y = cy - r * 0.05 + t * r * 0.95;
+    const h = 2 + t * r * 0.07;
+    stripes += `<rect x="${cx - r}" y="${y}" width="${r * 2}" height="${h}" fill="#3a1460"/>`;
+  }
+  return `
+    <circle cx="${cx}" cy="${cy}" r="${r * 1.6}" fill="url(#glow)"/>
+    <clipPath id="sunClip"><rect x="${cx - r}" y="${cy - r}" width="${r * 2}" height="${r}"/></clipPath>
+    <g clip-path="url(#sunClip)">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#sun)"/>
+      ${stripes}
+    </g>`;
+}
+
+// Ciudad de neón en el horizonte
+// sunX/sunR: los edificios cerca del sol son más bajos para que se vea
+function skyline(horizon, scale, layers, sunX, sunR) {
+  let out = "";
+  for (let layer = 0; layer < layers; layer++) {
+    const far = layer === 0;
+    let x = -20;
+    const base = horizon;
+    while (x < W + 20) {
+      const w = (40 + rand() * 70) * scale;
+      const distance = Math.min(1, Math.abs(x + w / 2 - sunX) / (sunR * 1.3));
+      const h = (far ? 80 + rand() * 160 : 50 + rand() * 230) * scale * (0.25 + 0.75 * distance * distance);
+      const color = far ? "#2a1450" : "#150a2e";
+      out += `<rect x="${x}" y="${base - h}" width="${w}" height="${h}" fill="${color}"/>`;
+      // Franja de neón en lo alto
+      const neon = NEON[Math.floor(rand() * NEON.length)];
+      if (!far || rand() < 0.4) {
+        out += `<rect x="${x}" y="${base - h}" width="${w}" height="${Math.max(2, 3 * scale)}" fill="${neon}" opacity="${far ? 0.5 : 0.9}"/>`;
+      }
+      // Ventanas encendidas
+      if (!far) {
+        const cols = Math.max(1, Math.floor(w / (14 * scale)));
+        const rows = Math.max(1, Math.floor(h / (18 * scale)));
+        for (let c = 0; c < cols; c++) {
+          for (let r = 1; r < rows; r++) {
+            if (rand() < 0.18) {
+              out += `<rect x="${x + 5 * scale + c * 14 * scale}" y="${base - h + r * 18 * scale}" width="${6 * scale}" height="${8 * scale}" fill="${rand() < 0.5 ? "#ffd34d" : "#7fe9ff"}" opacity="0.75"/>`;
+            }
+          }
+        }
+      }
+      x += w + (far ? 0 : rand() * 10 * scale);
+    }
+  }
+  return out;
+}
+
+// Suelo con rejilla de neón en perspectiva
+function grid(horizon, vx) {
+  let out = `<rect x="0" y="${horizon}" width="${W}" height="${H - horizon}" fill="url(#floor)"/>`;
+  let lines = "";
+  const depth = H - horizon;
+  for (let i = 1; i <= 12; i++) {
+    const t = Math.pow(i / 12, 2.2);
+    const y = horizon + t * depth;
+    lines += `<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="#ff3fb4" stroke-width="${1 + t * 3}" opacity="${0.25 + t * 0.6}"/>`;
+  }
+  for (let i = -14; i <= 14; i++) {
+    const x2 = vx + i * (W / 7);
+    lines += `<line x1="${vx}" y1="${horizon}" x2="${x2}" y2="${H}" stroke="#ff3fb4" stroke-width="2" opacity="0.55"/>`;
+  }
+  out += `<g filter="url(#neon)">${lines}</g>`;
+  out += `<rect x="0" y="${horizon - 2}" width="${W}" height="4" fill="#ffb3e6" filter="url(#neon)"/>`;
+  return out;
+}
+
+// Plataforma flotante con borde de neón (caja en falsa perspectiva)
+function platform(x, y, w, d, h, color) {
+  const top = `${x},${y} ${x + w},${y} ${x + w - d * 0.6},${y - d * 0.35} ${x - d * 0.6},${y - d * 0.35}`;
+  return `
+    <g filter="url(#shadow)">
+      <polygon points="${top}" fill="#3b3f63"/>
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#23263f"/>
+      <polygon points="${x - d * 0.6},${y - d * 0.35} ${x},${y} ${x},${y + h} ${x - d * 0.6},${y + h - d * 0.35}" fill="#1a1c30"/>
+    </g>
+    <g filter="url(#neon)">
+      <line x1="${x}" y1="${y}" x2="${x + w}" y2="${y}" stroke="${color}" stroke-width="5"/>
+      <line x1="${x}" y1="${y + h}" x2="${x + w}" y2="${y + h}" stroke="${color}" stroke-width="3" opacity="0.8"/>
+    </g>`;
+}
+
+// Personaje estilo Roblox saltando hacia la derecha
+function runnerGlow(x, y, r) {
+  return `<circle cx="${x}" cy="${y}" r="${r}" fill="url(#runnerGlow)"/>`;
+}
+
+function runner(x, y, s) {
+  const outline = `stroke="#0b0b1a" stroke-width="6" stroke-linejoin="round"`;
+  const limb = (px, py, angle, fill, len = 82) =>
+    `<g transform="translate(${px} ${py}) rotate(${angle})"><rect x="-20" y="-6" width="40" height="${len}" rx="8" fill="${fill}" ${outline}/></g>`;
+  const skin = "#f5cd30";
+  const shirt = "#1e9bff";
+  const pants = "#2b2f55";
+  return `
+  <g transform="translate(${x} ${y}) scale(${s}) rotate(-14)">
+    ${limb(-34, -32, 60, skin)}
+    ${limb(-18, 38, 48, pants)}
+    <rect x="-42" y="-42" width="84" height="84" rx="8" fill="${shirt}" ${outline}/>
+    <rect x="-42" y="-42" width="84" height="18" rx="8" fill="#5fc0ff" opacity="0.9"/>
+    <path d="M -10 -4 L 6 -4 L -2 12 L 10 12 L -8 34 L -2 16 L -12 16 Z" fill="#ffd34d" stroke="#0b0b1a" stroke-width="3"/>
+    ${limb(18, 38, -62, pants)}
+    <g>
+      <rect x="-28" y="-104" width="56" height="56" rx="14" fill="${skin}" ${outline}/>
+      <rect x="-12" y="-86" width="8" height="12" rx="3" fill="#0b0b1a"/>
+      <rect x="8" y="-86" width="8" height="12" rx="3" fill="#0b0b1a"/>
+      <path d="M -10 -66 Q 3 -56 16 -66" fill="none" stroke="#0b0b1a" stroke-width="4" stroke-linecap="round"/>
+    </g>
+    ${limb(36, -32, -78, skin)}
+  </g>`;
+}
+
+// Estela de velocidad detrás del personaje
+function trail(x, y, length, thickness) {
+  const top = y - thickness / 2;
+  return `
+    <polygon points="${x},${top} ${x - length},${y - thickness * 0.15} ${x - length},${y + thickness * 0.15} ${x},${top + thickness}"
+      fill="url(#trail)" filter="url(#softGlow)"/>`;
+}
+
+function speedLines(x, y, spread, count, maxLen) {
+  let out = "";
+  for (let i = 0; i < count; i++) {
+    const ly = y - spread / 2 + rand() * spread;
+    const len = maxLen * (0.4 + rand() * 0.6);
+    const lx = x - rand() * maxLen * 0.3;
+    out += `<rect x="${lx - len}" y="${ly}" width="${len}" height="${2 + rand() * 4}" rx="2" fill="url(#speed)" opacity="${0.4 + rand() * 0.5}"/>`;
+  }
+  return out;
+}
+
+function titleText(x, y, size, text, fill, stroke, anchor = "middle") {
+  const common = `x="${x}" y="${y}" font-family="Inter Display, Inter, sans-serif" font-weight="900"
+    font-size="${size}" text-anchor="${anchor}" letter-spacing="${size * 0.01}"`;
+  return `
+    <g transform="skewX(-10)" style="transform-origin:${x}px ${y}px">
+      <text ${common} fill="#0b0726" opacity="0.7" transform="translate(0 ${size * 0.06})">${text}</text>
+      <text ${common} fill="none" stroke="#0b0726" stroke-width="${size * 0.12}" stroke-linejoin="round">${text}</text>
+      <text ${common} fill="none" stroke="${stroke}" stroke-width="${size * 0.05}" stroke-linejoin="round" filter="url(#neon)">${text}</text>
+      <text ${common} fill="${fill}">${text}</text>
+    </g>`;
+}
+
+function thumbnail() {
+  const horizon = 700;
+  return `
+  <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    ${defs()}
+    <rect width="${W}" height="${H}" fill="url(#sky)"/>
+    ${sun(980, horizon, 330)}
+    ${skyline(horizon, 1.6, 2, 980, 330)}
+    ${grid(horizon, 980)}
+    ${platform(90, 860, 420, 120, 70, "#00d4ff")}
+    ${platform(1340, 960, 520, 140, 80, "#ff3fb4")}
+    ${speedLines(560, 520, 300, 18, 520)}
+    ${runnerGlow(560, 520, 260)}
+    ${trail(500, 540, 520, 150)}
+    ${runner(560, 540, 2.15)}
+    ${titleText(1330, 330, 192, TITLE, "url(#title)", "#00d4ff")}
+    ${titleText(1330, 465, 108, SUBTITLE, "url(#subtitle)", "#ff3fb4")}
+    <rect width="${W}" height="${H}" fill="url(#vignette)"/>
+  </svg>`;
+}
+
+function icon() {
+  const horizon = 330;
+  return `
+  <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    ${defs()}
+    <rect width="${W}" height="${H}" fill="url(#sky)"/>
+    ${sun(256, horizon, 150)}
+    ${skyline(horizon, 0.75, 2, 256, 150)}
+    ${grid(horizon, 256)}
+    ${speedLines(230, 215, 150, 12, 230)}
+    ${runnerGlow(262, 215, 120)}
+    ${trail(215, 220, 230, 90)}
+    ${runner(262, 228, 1.2)}
+    ${titleText(256, 470, 86, TITLE, "url(#title)", "#00d4ff")}
+    <rect width="${W}" height="${H}" fill="url(#vignette)"/>
+  </svg>`;
+}
+
+document.getElementById("root").innerHTML = mode === "thumb" ? thumbnail() : icon();
+</script>
+</body>
+</html>
