@@ -215,20 +215,22 @@ function ShopMenu.promptVip()
 end
 
 -- Imagen del pase: la subida a Roblox o, si aún no hay, una moneda/corona dibujada
-local function passIcon(parent: Instance, pass: PassInfo)
+local function passIcon(parent: Instance, pass: PassInfo, size: number)
 	local info = getInfo(pass.id)
 	if info and info.icon then
 		UI.new("ImageLabel", {
-			Position = UDim2.fromOffset(12, 14),
-			Size = UDim2.fromOffset(110, 110),
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 14, 0.5, 0),
+			Size = UDim2.fromOffset(size, size),
 			BackgroundTransparency = 1,
 			Image = "rbxassetid://" .. info.icon,
 		}, parent)
 		return
 	end
 	local coin = UI.new("Frame", {
-		Position = UDim2.fromOffset(16, 18),
-		Size = UDim2.fromOffset(100, 100),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 20, 0.5, 0),
+		Size = UDim2.fromOffset(size - 12, size - 12),
 		BackgroundColor3 = Color3.new(1, 1, 1),
 	}, parent)
 	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, coin)
@@ -245,52 +247,76 @@ local function passIcon(parent: Instance, pass: PassInfo)
 	})
 end
 
+-- Tarjeta ancha de un pase (ocupa toda la fila)
+local function passCard(parent: Instance, order: number, pass: PassInfo, description: string, ownedText: string?)
+	local style = PASS_STYLE[pass.key] or PASS_STYLE.coins2
+	local frame = card(parent, order, style[1])
+	passIcon(frame, pass, 134)
+	cartoonText(frame, {
+		Position = UDim2.fromOffset(164, 14),
+		Size = UDim2.new(1, -180, 0, 46),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = pass.title,
+	}, 3.5)
+	cartoonText(frame, {
+		Position = UDim2.fromOffset(166, 64),
+		Size = UDim2.new(1, -470, 0, 80),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextWrapped = true,
+		Text = description,
+	})
+
+	local text, color, onClick = "", COLORS.Disabled, nil
+	if ownedText then
+		text = ownedText
+	elseif pass.id == 0 then
+		text = "Próximamente"
+	else
+		local info = getInfo(pass.id)
+		text = if info and info.price then ROBUX .. " " .. info.price else ROBUX .. " Comprar"
+		color = COLORS.Price
+		onClick = function()
+			ShopMenu.promptPass(pass.key)
+		end
+	end
+	local button = cartoonButton(frame, text, color, {
+		AnchorPoint = Vector2.new(1, 1),
+		Position = UDim2.new(1, -16, 1, -16),
+		Size = UDim2.fromOffset(270, 56),
+	})
+	if onClick then
+		button.Activated:Connect(onClick)
+	end
+end
+
 local function renderPasses(order: number)
-	local grid = section("Pases", order, Vector2.new(352, 150))
+	local list = section("Pases", order, Vector2.new(716, 164))
 	local data = ClientState.data
 	local owned = data and data.ownedPasses or {}
+	local passes = passList()
 
-	for i, pass in passList() do
-		local style = PASS_STYLE[pass.key] or PASS_STYLE.coins2
-		local frame = card(grid, i, style[1])
-		passIcon(frame, pass)
-		cartoonText(frame, {
-			Position = UDim2.fromOffset(128, 10),
-			Size = UDim2.new(1, -138, 0, 34),
-			Text = pass.title,
-		}, 3)
-		cartoonText(frame, {
-			Position = UDim2.fromOffset(132, 46),
-			Size = UDim2.new(1, -146, 0, 48),
-			TextWrapped = true,
-			Text = pass.description,
-		})
+	-- VIP
+	local vip = passes[1]
+	passCard(list, 1, vip, vip.description, if owned.vip then "✓ Ya eres VIP" else nil)
 
-		local text, color, onClick = "", COLORS.Disabled, nil
-		if owned[pass.key] then
-			text = "✓ Comprado"
-		elseif pass.id == 0 then
-			text = "Próximamente"
-		elseif pass.requires and not owned[pass.requires] then
-			text = "🔒 Compra " .. (pass.requiresName or "")
-			onClick = function()
-				HUD.popup("Primero compra Monedas " .. (pass.requiresName or ""), UI.Colors.Bad)
-			end
-		else
-			local info = getInfo(pass.id)
-			text = if info and info.price then ROBUX .. " " .. info.price else ROBUX .. " Comprar"
-			color = COLORS.Price
-			onClick = function()
-				ShopMenu.promptPass(pass.key)
-			end
+	-- Monedas: solo se ve el siguiente pase que te falta (x2, luego x3...)
+	local nextPass, maxed = nil, false
+	for i = 2, #passes do
+		if not owned[passes[i].key] then
+			nextPass = passes[i]
+			break
 		end
-		local button = cartoonButton(frame, text, color, {
-			Position = UDim2.new(0, 132, 1, -52),
-			Size = UDim2.new(1, -144, 0, 42),
-		})
-		if onClick then
-			button.Activated:Connect(onClick)
-		end
+	end
+	if not nextPass then
+		nextPass, maxed = passes[#passes], true
+	end
+	if nextPass then
+		local isFirst = nextPass == passes[2]
+		local description = if maxed
+			then "¡Tienes el multiplicador máximo!"
+			elseif isFirst then nextPass.description
+			else nextPass.description .. "\n¿Qué vendrá después...? 👀"
+		passCard(list, 2, nextPass, description, if maxed then "✓ Comprado" else nil)
 	end
 end
 
