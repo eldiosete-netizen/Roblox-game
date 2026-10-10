@@ -144,7 +144,7 @@ function RankingsMenu.start()
 		end
 	end)
 
-	HUD.addSideButton("🏆 Rankings", 15, nil, function()
+	HUD.addSideButton("🏆 Rankings", 15, Color3.fromRGB(150, 70, 255), function()
 		UI.toggle(PANEL)
 	end)
 end

@@ -377,7 +377,7 @@ function HUD.start()
 	updateMapInfo()
 	updateStats()
 
-	HUD.addSideButton("🏠 Lobby", 90, nil, function()
+	HUD.addSideButton("🏠 Lobby", 90, Color3.fromRGB(0, 175, 110), function()
 		Remotes.ReturnToLobby:FireServer()
 	end)
 

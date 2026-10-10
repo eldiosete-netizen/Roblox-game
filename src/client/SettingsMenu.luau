@@ -74,7 +74,7 @@ function SettingsMenu.start()
 		end
 	end)
 
-	HUD.addSideButton("⚙ Ajustes", 30, nil, function()
+	HUD.addSideButton("⚙ Ajustes", 30, Color3.fromRGB(255, 120, 40), function()
 		UI.toggle(PANEL)
 	end)
 end

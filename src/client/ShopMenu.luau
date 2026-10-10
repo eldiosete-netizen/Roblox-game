@@ -22,6 +22,7 @@ local PASSES = "Passes" -- pestaña de Robux
 
 local currentKind = "Trail"
 local grid: ScrollingFrame
+local gridLayout: UIGridLayout
 local tabButtons: { [string]: TextButton } = {}
 local panelFrame: Frame
 
@@ -72,15 +73,35 @@ end
 
 -- Pases de Robux ----------------------------------------------------------------------
 
-type PassInfo = { key: string, id: number, title: string, description: string, requires: string?, requiresName: string? }
+type PassInfo = {
+	key: string,
+	id: number,
+	title: string,
+	description: string,
+	color: Color3,
+	emblem: string,
+	requires: string?,
+	requiresName: string?,
+}
+
+-- Color de cada pase (igual que en sus imágenes)
+local PASS_COLORS = {
+	vip = Color3.fromRGB(255, 205, 40),
+	coins2 = Color3.fromRGB(0, 168, 255),
+	coins3 = Color3.fromRGB(0, 201, 107),
+	coins5 = Color3.fromRGB(155, 77, 255),
+	coins10 = Color3.fromRGB(255, 46, 91),
+}
 
 local function passList(): { PassInfo }
 	local list = {
 		{
 			key = "vip",
 			id = Config.VipGamePassId,
-			title = "⭐ VIP",
+			title = "VIP",
 			description = "Mapa Cielo, objetos exclusivos y +50% monedas",
+			color = PASS_COLORS.vip,
+			emblem = "👑",
 		},
 	}
 	for i, pass in Config.CoinPasses do
@@ -88,8 +109,10 @@ local function passList(): { PassInfo }
 		table.insert(list, {
 			key = pass.key,
 			id = pass.id,
-			title = string.format("🪙 x%d", pass.multiplier),
+			title = string.format("Monedas x%d", pass.multiplier),
 			description = string.format("Ganas %d veces más monedas", pass.multiplier),
+			color = PASS_COLORS[pass.key] or UI.Colors.Gold,
+			emblem = "⚡",
 			requires = previous and previous.key,
 			requiresName = previous and string.format("x%d", previous.multiplier),
 		})
@@ -97,22 +120,61 @@ local function passList(): { PassInfo }
 	return list
 end
 
-local prices: { [number]: number | false } = {}
+-- Precio e imagen de cada pase (se piden a Roblox una vez y se guardan)
+type ProductInfo = { price: number?, icon: number? }
+local productInfo: { [number]: ProductInfo | false } = {}
 local refresh: () -> ()
 
-local function priceText(id: number): string
-	local price = prices[id]
-	if price == nil then
-		prices[id] = false
+local function getInfo(id: number): ProductInfo?
+	local info = productInfo[id]
+	if info == nil and id ~= 0 then
+		productInfo[id] = false
 		task.spawn(function()
-			local ok, info = pcall(MarketplaceService.GetProductInfo, MarketplaceService, id, Enum.InfoType.GamePass)
-			prices[id] = if ok and info and info.PriceInRobux then info.PriceInRobux else false
+			local ok, result = pcall(MarketplaceService.GetProductInfo, MarketplaceService, id, Enum.InfoType.GamePass)
+			productInfo[id] = {
+				price = if ok and result then result.PriceInRobux else nil,
+				icon = if ok and result and result.IconImageAssetId ~= 0 then result.IconImageAssetId else nil,
+			}
 			if panelFrame.Visible and currentKind == PASSES then
 				refresh()
 			end
 		end)
 	end
-	return if typeof(price) == "number" then string.format("R$ %d", price) else "Comprar"
+	return if info then info else nil
+end
+
+-- Imagen del pase: la que subiste a Roblox o, si aún no hay, una moneda dibujada
+local function passImage(parent: Instance, pass: PassInfo)
+	local info = getInfo(pass.id)
+	if info and info.icon then
+		local image = UI.new("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, 10),
+			Size = UDim2.fromOffset(78, 78),
+			BackgroundTransparency = 1,
+			Image = "rbxassetid://" .. info.icon,
+		}, parent)
+		UI.corner(image, 12)
+		return
+	end
+	local emblem = UI.new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 14),
+		Size = UDim2.fromOffset(70, 70),
+		BackgroundColor3 = Color3.fromRGB(255, 200, 40),
+	}, parent)
+	UI.new("UICorner", { CornerRadius = UDim.new(0.5, 0) }, emblem)
+	UI.new("UIStroke", { Color = pass.color, Thickness = 4 }, emblem)
+	UI.new("UIGradient", {
+		Color = ColorSequence.new(Color3.fromRGB(255, 245, 170), Color3.fromRGB(240, 150, 0)),
+		Rotation = 90,
+	}, emblem)
+	UI.label(emblem, {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.7, 0.7),
+		Text = pass.emblem,
+	})
 end
 
 local function renderPasses()
@@ -125,18 +187,19 @@ local function renderPasses()
 			LayoutOrder = i,
 		}, grid)
 		UI.corner(card, 10)
-		UI.new("UIStroke", { Color = UI.Colors.Gold, Thickness = 2, Transparency = 0.5 }, card)
+		UI.new("UIStroke", { Color = pass.color, Thickness = 2, Transparency = 0.3 }, card)
 
+		passImage(card, pass)
 		UI.label(card, {
-			Position = UDim2.fromOffset(8, 8),
-			Size = UDim2.new(1, -16, 0, 44),
+			Position = UDim2.fromOffset(8, 94),
+			Size = UDim2.new(1, -16, 0, 26),
 			Font = Enum.Font.GothamBlack,
-			TextColor3 = UI.Colors.Gold,
+			TextColor3 = pass.color,
 			Text = pass.title,
 		})
 		UI.label(card, {
-			Position = UDim2.fromOffset(8, 54),
-			Size = UDim2.new(1, -16, 0, 40),
+			Position = UDim2.fromOffset(8, 122),
+			Size = UDim2.new(1, -16, 0, 30),
 			Font = Enum.Font.Gotham,
 			TextColor3 = UI.Colors.Muted,
 			TextWrapped = true,
@@ -154,7 +217,9 @@ local function renderPasses()
 				HUD.popup("Primero compra Monedas " .. (pass.requiresName or ""), UI.Colors.Bad)
 			end
 		else
-			text, color, textColor = priceText(pass.id), UI.Colors.Gold, UI.Colors.Background
+			local info = getInfo(pass.id)
+			local price = if info and info.price then string.format("R$ %d", info.price) else "Comprar"
+			text, color, textColor = price, UI.Colors.Gold, UI.Colors.Background
 			action = function()
 				ShopMenu.promptPass(pass.key)
 			end
@@ -183,6 +248,8 @@ function refresh()
 		end
 	end
 
+	-- Las tarjetas de pases son más altas para que quepa la imagen
+	gridLayout.CellSize = if currentKind == PASSES then UDim2.fromOffset(150, 200) else UDim2.fromOffset(150, 150)
 	if currentKind == PASSES then
 		renderPasses()
 		return
@@ -288,7 +355,7 @@ function ShopMenu.start()
 		CanvasSize = UDim2.new(),
 		AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	}, content)
-	UI.new("UIGridLayout", {
+	gridLayout = UI.new("UIGridLayout", {
 		CellSize = UDim2.fromOffset(150, 150),
 		CellPadding = UDim2.fromOffset(12, 12),
 		SortOrder = Enum.SortOrder.LayoutOrder,
