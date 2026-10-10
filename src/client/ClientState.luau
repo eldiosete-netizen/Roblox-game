@@ -35,6 +35,16 @@ function ClientState.setting(key: string): boolean
 	return value == true
 end
 
+-- Cambia un ajuste: se aplica al momento y se guarda en el servidor
+function ClientState.setSetting(key: string, value: boolean)
+	local data = ClientState.data
+	if data then
+		data.settings[key] = value
+	end
+	changed:Fire()
+	Remotes.UpdateSetting:FireServer(key, value)
+end
+
 -- Carpeta de un mapa en Workspace (con sus atributos: nombre, medallas...)
 function ClientState.mapFolder(mapId: string): Folder?
 	local maps = workspace:FindFirstChild("Maps")

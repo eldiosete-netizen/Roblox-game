@@ -185,6 +185,19 @@ Remotes.DataSync.OnServerEvent:Connect(function(player)
 	PlayerData.sync(player)
 end)
 
+-- Ajustes del jugador (solo claves conocidas y valores sí/no)
+Remotes.UpdateSetting.OnServerEvent:Connect(function(player, settingKey, value)
+	local profile = profiles[player]
+	if not profile or typeof(settingKey) ~= "string" or typeof(value) ~= "boolean" then
+		return
+	end
+	if Config.DefaultSettings[settingKey] == nil then
+		return
+	end
+	profile.data.settings[settingKey] = value
+	PlayerData.sync(player)
+end)
+
 task.spawn(function()
 	while true do
 		task.wait(Config.AutosaveInterval)

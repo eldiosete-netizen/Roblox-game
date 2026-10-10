@@ -10,6 +10,7 @@ local UserInputService = game:GetService("UserInputService")
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
 local player = Players.LocalPlayer
+local ClientState = require(player:WaitForChild("PlayerScripts"):WaitForChild("Client"):WaitForChild("ClientState"))
 local character = script:FindFirstAncestorOfClass("Model") :: Model
 local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 local root = character:WaitForChild("HumanoidRootPart") :: BasePart
@@ -92,6 +93,17 @@ ContextActionService:BindAction(SLIDE_ACTION, function(_, inputState)
 end, true, Enum.KeyCode.C, Enum.KeyCode.LeftControl, Enum.KeyCode.ButtonB)
 ContextActionService:SetTitle(SLIDE_ACTION, "Deslizar")
 ContextActionService:SetPosition(SLIDE_ACTION, UDim2.new(1, -170, 1, -110))
+
+-- En móvil, botón de deslizar más grande y cerca del de saltar
+local slideButton = ContextActionService:GetButton(SLIDE_ACTION)
+if slideButton then
+	slideButton.Size = UDim2.fromOffset(90, 90)
+	slideButton.Position = UDim2.new(1, -220, 1, -130)
+	local title = slideButton:FindFirstChild("ActionTitle")
+	if title and title:IsA("TextLabel") then
+		title.TextScaled = true
+	end
+end
 
 -- Wall run -----------------------------------------------------------------
 
@@ -240,7 +252,9 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 		0,
 		1
 	)
-	local targetFov = Config.BaseFOV + (Config.MaxFOV - Config.BaseFOV) * speedAlpha
+	local targetFov = if ClientState.setting("fov")
+		then Config.BaseFOV + (Config.MaxFOV - Config.BaseFOV) * speedAlpha
+		else Config.BaseFOV
 	camera.FieldOfView += (targetFov - camera.FieldOfView) * math.min(dt * 6, 1)
 end)
 

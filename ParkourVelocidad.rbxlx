@@ -678,6 +678,48 @@ local THEMES: { [string]: Theme } = {
 -- Para añadir un mapa nuevo: añade una entrada aquí
 CourseBuilder.Definitions = {
 	{
+		id = "tutorial",
+		theme = THEMES.Ciudad,
+		attributes = {
+			DisplayName = "Tutorial",
+			Order = 0,
+			Color = Color3.fromRGB(0, 230, 120),
+			Tutorial = true,
+		},
+		build = function(m)
+			m:start()
+			m:sign("Corre sin parar: cuanto más corres, más rápido vas", 0)
+			m:runway(40)
+			m:sign("Salta los huecos con Espacio", 0)
+			m:gap(5)
+			m:block(10, 10, 1)
+			m:gap(5)
+			m:block(10, 10, 2)
+			m:sign("Pulsa C (o el botón Deslizar) para ganar velocidad", 2)
+			m:runway(30, 2)
+			m:gap(12)
+			m:checkpoint(m:block(16, 16, 2))
+			m:sign("Salta hacia la pared naranja mientras corres", 2)
+			m:wallRun(-1, 24, 2)
+			m:sign("En la pared, pulsa Espacio para hacer un wall jump", 2)
+			m:checkpoint(m:wallRun(1, 30, 2))
+			m:sign("Los trampolines rosas te lanzan muy alto", 2)
+			m:trampoline(2)
+			m:gap(8)
+			m:block(16, 12, 18)
+			m:sign("Salta hacia el cable para usar la tirolina", 18)
+			m:zipline(60, 10, 18)
+			m:checkpoint(m:block(16, 14, 6))
+			m:sign("Zona morada: gravedad baja, ¡salta lejos!", 6)
+			m:lowGravity(30, 6)
+			m:gap(24)
+			m:block(10, 10, 10)
+			m:gap(6)
+			m:sign("¡Llega a la meta!", 10)
+			m:finish(10)
+		end,
+	},
+	{
 		id = "ciudad",
 		theme = THEMES.Ciudad,
 		attributes = {
@@ -2073,6 +2115,19 @@ Remotes.DataSync.OnServerEvent:Connect(function(player)
 	PlayerData.sync(player)
 end)
 
+-- Ajustes del jugador (solo claves conocidas y valores sí/no)
+Remotes.UpdateSetting.OnServerEvent:Connect(function(player, settingKey, value)
+	local profile = profiles[player]
+	if not profile or typeof(settingKey) ~= "string" or typeof(value) ~= "boolean" then
+		return
+	end
+	if Config.DefaultSettings[settingKey] == nil then
+		return
+	end
+	profile.data.settings[settingKey] = value
+	PlayerData.sync(player)
+end)
+
 task.spawn(function()
 	while true do
 		task.wait(Config.AutosaveInterval)
@@ -2996,6 +3051,7 @@ local UserInputService = game:GetService("UserInputService")
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
 local player = Players.LocalPlayer
+local ClientState = require(player:WaitForChild("PlayerScripts"):WaitForChild("Client"):WaitForChild("ClientState"))
 local character = script:FindFirstAncestorOfClass("Model") :: Model
 local humanoid = character:WaitForChild("Humanoid") :: Humanoid
 local root = character:WaitForChild("HumanoidRootPart") :: BasePart
@@ -3078,6 +3134,17 @@ ContextActionService:BindAction(SLIDE_ACTION, function(_, inputState)
 end, true, Enum.KeyCode.C, Enum.KeyCode.LeftControl, Enum.KeyCode.ButtonB)
 ContextActionService:SetTitle(SLIDE_ACTION, "Deslizar")
 ContextActionService:SetPosition(SLIDE_ACTION, UDim2.new(1, -170, 1, -110))
+
+-- En móvil, botón de deslizar más grande y cerca del de saltar
+local slideButton = ContextActionService:GetButton(SLIDE_ACTION)
+if slideButton then
+	slideButton.Size = UDim2.fromOffset(90, 90)
+	slideButton.Position = UDim2.new(1, -220, 1, -130)
+	local title = slideButton:FindFirstChild("ActionTitle")
+	if title and title:IsA("TextLabel") then
+		title.TextScaled = true
+	end
+end
 
 -- Wall run -----------------------------------------------------------------
 
@@ -3226,7 +3293,9 @@ local connection = RunService.Heartbeat:Connect(function(dt)
 		0,
 		1
 	)
-	local targetFov = Config.BaseFOV + (Config.MaxFOV - Config.BaseFOV) * speedAlpha
+	local targetFov = if ClientState.setting("fov")
+		then Config.BaseFOV + (Config.MaxFOV - Config.BaseFOV) * speedAlpha
+		else Config.BaseFOV
 	camera.FieldOfView += (targetFov - camera.FieldOfView) * math.min(dt * 6, 1)
 end)
 
@@ -3312,6 +3381,16 @@ function ClientState.setting(key: string): boolean
 		return Config.DefaultSettings[key] ~= false
 	end
 	return value == true
+end
+
+-- Cambia un ajuste: se aplica al momento y se guarda en el servidor
+function ClientState.setSetting(key: string, value: boolean)
+	local data = ClientState.data
+	if data then
+		data.settings[key] = value
+	end
+	changed:Fire()
+	Remotes.UpdateSetting:FireServer(key, value)
 end
 
 -- Carpeta de un mapa en Workspace (con sus atributos: nombre, medallas...)
@@ -3869,6 +3948,19 @@ local function build()
 	UI.autoScale(sideBar, 0.6)
 end
 
+-- En móvil, los botones de ContextActionService son pequeños: los agrandamos
+function HUD.enlargeTouchButton(actionName: string, position: UDim2)
+	local button = ContextActionService:GetButton(actionName)
+	if button then
+		button.Size = UDim2.fromOffset(80, 80)
+		button.Position = position
+		local title = button:FindFirstChild("ActionTitle")
+		if title and title:IsA("TextLabel") then
+			title.TextScaled = true
+		end
+	end
+end
+
 function HUD.setControlsVisible(visible: boolean)
 	local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 	controlsLabel.Visible = visible and not isTouch
@@ -3886,6 +3978,9 @@ function HUD.start()
 	player:GetAttributeChangedSignal("MapId"):Connect(updateMapInfo)
 	ClientState.Changed:Connect(updateMapInfo)
 	ClientState.Changed:Connect(updateStats)
+	ClientState.Changed:Connect(function()
+		HUD.setControlsVisible(ClientState.setting("hints"))
+	end)
 	updateMapInfo()
 	updateStats()
 
@@ -3999,6 +4094,7 @@ function HUD.start()
 	end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonY)
 	ContextActionService:SetTitle("ParkourRestart", "Reiniciar")
 	ContextActionService:SetPosition("ParkourRestart", UDim2.new(1, -200, 1, -210))
+	HUD.enlargeTouchButton("ParkourRestart", UDim2.new(1, -200, 1, -230))
 end
 
 return HUD
@@ -4112,15 +4208,19 @@ local Client = script.Parent
 
 local HUD = require(Client:WaitForChild("HUD"))
 local MapMenu = require(Client:WaitForChild("MapMenu"))
-local Obstacles = require(Client:WaitForChild("Obstacles"))
-local Ghost = require(Client:WaitForChild("Ghost"))
 local LiveRaceUI = require(Client:WaitForChild("LiveRaceUI"))
 local ShopMenu = require(Client:WaitForChild("ShopMenu"))
+local SettingsMenu = require(Client:WaitForChild("SettingsMenu"))
+local StartMenu = require(Client:WaitForChild("StartMenu"))
+local Obstacles = require(Client:WaitForChild("Obstacles"))
+local Ghost = require(Client:WaitForChild("Ghost"))
 
 HUD.start()
 MapMenu.start()
 LiveRaceUI.start()
 ShopMenu.start()
+SettingsMenu.start()
+StartMenu.start()
 Obstacles.start()
 Ghost.start()
 ]]></string>
@@ -4296,6 +4396,10 @@ function MapMenu.start()
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		Padding = UDim.new(0, 10),
 	}, list)
+
+	MapMenu.addHeaderButton("📘 Tutorial", 1, UI.Colors.Good, function()
+		play("tutorial")
+	end)
 
 	UI.onOpen(PANEL, MapMenu.refresh)
 	ClientState.Changed:Connect(function()
@@ -4600,6 +4704,94 @@ return Obstacles
         </Item>
         <Item class="ModuleScript" referent="32">
           <Properties>
+            <string name="Name">SettingsMenu</string>
+            <string name="Source"><![CDATA[-- Ajustes del jugador (se guardan en su cuenta).
+
+local ClientState = require(script.Parent:WaitForChild("ClientState"))
+local HUD = require(script.Parent:WaitForChild("HUD"))
+local UI = require(script.Parent:WaitForChild("UI"))
+
+local SettingsMenu = {}
+
+local PANEL = "Settings"
+
+local OPTIONS = {
+	{ key = "shake", name = "Temblor de cámara al caer" },
+	{ key = "fov", name = "Efecto de velocidad en la cámara" },
+	{ key = "ghost", name = "Mostrar fantasma (tu mejor intento)" },
+	{ key = "wind", name = "Sonido de viento" },
+	{ key = "hints", name = "Mostrar controles en pantalla" },
+}
+
+local toggles: { [string]: TextButton } = {}
+
+local function refresh()
+	for key, button in toggles do
+		local on = ClientState.setting(key)
+		button.Text = if on then "SÍ" else "NO"
+		button.BackgroundColor3 = if on then UI.Colors.Good else UI.Colors.Card
+	end
+end
+
+function SettingsMenu.start()
+	local frame, content = UI.panel(HUD.gui, PANEL, "⚙  Ajustes", UDim2.fromOffset(560, 470))
+
+	UI.new("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 10),
+	}, content)
+
+	for i, option in OPTIONS do
+		local row = UI.new("Frame", {
+			Size = UDim2.new(1, 0, 0, 52),
+			BackgroundColor3 = UI.Colors.Card,
+			LayoutOrder = i,
+		}, content)
+		UI.corner(row, 10)
+		UI.label(row, {
+			Position = UDim2.fromOffset(16, 12),
+			Size = UDim2.new(1, -140, 0, 28),
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Text = option.name,
+		})
+		local toggle = UI.button(row, "SÍ", UI.Colors.Good, {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -10, 0.5, 0),
+			Size = UDim2.fromOffset(100, 38),
+		})
+		toggle.Activated:Connect(function()
+			ClientState.setSetting(option.key, not ClientState.setting(option.key))
+		end)
+		toggles[option.key] = toggle
+	end
+
+	UI.label(content, {
+		Size = UDim2.new(1, 0, 0, 40),
+		LayoutOrder = 100,
+		Font = Enum.Font.Gotham,
+		TextColor3 = UI.Colors.Muted,
+		TextWrapped = true,
+		Text = "La sensibilidad de la cámara y el volumen se cambian en el menú de Roblox (tecla Esc).",
+	})
+
+	UI.onOpen(PANEL, refresh)
+	ClientState.Changed:Connect(function()
+		if frame.Visible then
+			refresh()
+		end
+	end)
+
+	HUD.addSideButton("⚙ Ajustes", 30, nil, function()
+		UI.toggle(PANEL)
+	end)
+end
+
+return SettingsMenu
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="33">
+          <Properties>
             <string name="Name">ShopMenu</string>
             <string name="Source"><![CDATA[-- Tienda: rastros, efectos de salto y de deslizamiento, y el pase VIP.
 
@@ -4816,7 +5008,133 @@ return ShopMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="34">
+          <Properties>
+            <string name="Name">StartMenu</string>
+            <string name="Source"><![CDATA[-- Menú de inicio: aparece al entrar al juego.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local Remotes = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Remotes"))
+
+local ClientState = require(script.Parent:WaitForChild("ClientState"))
+local HUD = require(script.Parent:WaitForChild("HUD"))
+local UI = require(script.Parent:WaitForChild("UI"))
+
+local player = Players.LocalPlayer
+
+local StartMenu = {}
+
+local gui: ScreenGui
+local tutorialButton: TextButton
+local tutorialHint: TextLabel
+
+local function close()
+	local background = gui:FindFirstChild("Background") :: Frame
+	TweenService:Create(background, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+	for _, descendant in background:GetDescendants() do
+		if descendant:IsA("GuiObject") then
+			descendant.Visible = false
+		end
+	end
+	task.delay(0.3, function()
+		gui.Enabled = false
+	end)
+end
+
+local function updateTutorialHint()
+	local data = ClientState.data
+	local recommended = data ~= nil and not data.tutorialDone
+	tutorialHint.Visible = recommended
+	tutorialButton.BackgroundColor3 = if recommended then UI.Colors.Good else UI.Colors.Card
+end
+
+function StartMenu.start()
+	gui = UI.new("ScreenGui", {
+		Name = "StartMenu",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 10,
+	}, player:WaitForChild("PlayerGui"))
+
+	local background = UI.new("Frame", {
+		Name = "Background",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = UI.Colors.Background,
+		BackgroundTransparency = 0.15,
+	}, gui)
+	UI.new("UIGradient", {
+		Color = ColorSequence.new(Color3.fromRGB(0, 60, 110), Color3.fromRGB(60, 0, 90)),
+		Rotation = 45,
+	}, background)
+
+	local column = UI.new("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(520, 460),
+		BackgroundTransparency = 1,
+	}, background)
+	UI.autoScale(column, 0.6)
+
+	UI.label(column, {
+		Size = UDim2.new(1, 0, 0, 90),
+		Font = Enum.Font.GothamBlack,
+		Text = "PARKOUR DE VELOCIDAD",
+		TextStrokeTransparency = 0.5,
+	})
+	UI.label(column, {
+		Position = UDim2.fromOffset(0, 92),
+		Size = UDim2.new(1, 0, 0, 30),
+		Font = Enum.Font.Gotham,
+		TextColor3 = UI.Colors.Muted,
+		Text = "Corre, desliza y salta por las paredes. Bate tu récord.",
+	})
+
+	local playButton = UI.button(column, "JUGAR", UI.Colors.Accent, {
+		Position = UDim2.fromOffset(60, 160),
+		Size = UDim2.new(1, -120, 0, 70),
+	})
+	playButton.Activated:Connect(close)
+
+	tutorialButton = UI.button(column, "TUTORIAL", UI.Colors.Card, {
+		Position = UDim2.fromOffset(60, 250),
+		Size = UDim2.new(1, -120, 0, 60),
+	})
+	tutorialButton.Activated:Connect(function()
+		close()
+		local ok, message = Remotes.RequestMap:InvokeServer("tutorial")
+		if not ok and message then
+			HUD.popup(message, UI.Colors.Bad)
+		end
+	end)
+	tutorialHint = UI.label(column, {
+		Position = UDim2.fromOffset(60, 312),
+		Size = UDim2.new(1, -120, 0, 22),
+		TextColor3 = UI.Colors.Good,
+		Text = "¡Recomendado si es tu primera vez!",
+		Visible = false,
+	})
+
+	local settingsButton = UI.button(column, "AJUSTES", UI.Colors.Card, {
+		Position = UDim2.fromOffset(60, 350),
+		Size = UDim2.new(1, -120, 0, 60),
+	})
+	settingsButton.Activated:Connect(function()
+		close()
+		UI.open("Settings")
+	end)
+
+	updateTutorialHint()
+	ClientState.Changed:Connect(updateTutorialHint)
+end
+
+return StartMenu
+]]></string>
+          </Properties>
+        </Item>
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">UI</string>
             <string name="Source"><![CDATA[-- Pequeña librería para crear la interfaz con un estilo común.
@@ -4997,7 +5315,7 @@ return UI
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="34">
+  <Item class="Workspace" referent="36">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>

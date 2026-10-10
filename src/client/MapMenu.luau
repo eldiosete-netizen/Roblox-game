@@ -166,6 +166,10 @@ function MapMenu.start()
 		Padding = UDim.new(0, 10),
 	}, list)
 
+	MapMenu.addHeaderButton("📘 Tutorial", 1, UI.Colors.Good, function()
+		play("tutorial")
+	end)
+
 	UI.onOpen(PANEL, MapMenu.refresh)
 	ClientState.Changed:Connect(function()
 		if frame.Visible then

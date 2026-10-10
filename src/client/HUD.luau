@@ -328,6 +328,19 @@ local function build()
 	UI.autoScale(sideBar, 0.6)
 end
 
+-- En móvil, los botones de ContextActionService son pequeños: los agrandamos
+function HUD.enlargeTouchButton(actionName: string, position: UDim2)
+	local button = ContextActionService:GetButton(actionName)
+	if button then
+		button.Size = UDim2.fromOffset(80, 80)
+		button.Position = position
+		local title = button:FindFirstChild("ActionTitle")
+		if title and title:IsA("TextLabel") then
+			title.TextScaled = true
+		end
+	end
+end
+
 function HUD.setControlsVisible(visible: boolean)
 	local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 	controlsLabel.Visible = visible and not isTouch
@@ -345,6 +358,9 @@ function HUD.start()
 	player:GetAttributeChangedSignal("MapId"):Connect(updateMapInfo)
 	ClientState.Changed:Connect(updateMapInfo)
 	ClientState.Changed:Connect(updateStats)
+	ClientState.Changed:Connect(function()
+		HUD.setControlsVisible(ClientState.setting("hints"))
+	end)
 	updateMapInfo()
 	updateStats()
 
@@ -458,6 +474,7 @@ function HUD.start()
 	end, true, Enum.KeyCode.R, Enum.KeyCode.ButtonY)
 	ContextActionService:SetTitle("ParkourRestart", "Reiniciar")
 	ContextActionService:SetPosition("ParkourRestart", UDim2.new(1, -200, 1, -210))
+	HUD.enlargeTouchButton("ParkourRestart", UDim2.new(1, -200, 1, -230))
 end
 
 return HUD

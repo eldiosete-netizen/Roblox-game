@@ -293,6 +293,48 @@ local THEMES: { [string]: Theme } = {
 -- Para añadir un mapa nuevo: añade una entrada aquí
 CourseBuilder.Definitions = {
 	{
+		id = "tutorial",
+		theme = THEMES.Ciudad,
+		attributes = {
+			DisplayName = "Tutorial",
+			Order = 0,
+			Color = Color3.fromRGB(0, 230, 120),
+			Tutorial = true,
+		},
+		build = function(m)
+			m:start()
+			m:sign("Corre sin parar: cuanto más corres, más rápido vas", 0)
+			m:runway(40)
+			m:sign("Salta los huecos con Espacio", 0)
+			m:gap(5)
+			m:block(10, 10, 1)
+			m:gap(5)
+			m:block(10, 10, 2)
+			m:sign("Pulsa C (o el botón Deslizar) para ganar velocidad", 2)
+			m:runway(30, 2)
+			m:gap(12)
+			m:checkpoint(m:block(16, 16, 2))
+			m:sign("Salta hacia la pared naranja mientras corres", 2)
+			m:wallRun(-1, 24, 2)
+			m:sign("En la pared, pulsa Espacio para hacer un wall jump", 2)
+			m:checkpoint(m:wallRun(1, 30, 2))
+			m:sign("Los trampolines rosas te lanzan muy alto", 2)
+			m:trampoline(2)
+			m:gap(8)
+			m:block(16, 12, 18)
+			m:sign("Salta hacia el cable para usar la tirolina", 18)
+			m:zipline(60, 10, 18)
+			m:checkpoint(m:block(16, 14, 6))
+			m:sign("Zona morada: gravedad baja, ¡salta lejos!", 6)
+			m:lowGravity(30, 6)
+			m:gap(24)
+			m:block(10, 10, 10)
+			m:gap(6)
+			m:sign("¡Llega a la meta!", 10)
+			m:finish(10)
+		end,
+	},
+	{
 		id = "ciudad",
 		theme = THEMES.Ciudad,
 		attributes = {
