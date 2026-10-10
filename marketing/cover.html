@@ -2,13 +2,15 @@
 <!--
   Icono y miniatura del juego. Se dibujan con SVG para poder cambiar el título
   fácilmente. Abre ?mode=icon (512x512), ?mode=thumb (1920x1080) o
-  ?mode=vip (512x512, imagen del Game Pass VIP).
+  ?mode=vip (512x512, imagen del Game Pass VIP), ?mode=coin (moneda del
+  juego, fondo transparente) y ?mode=coins2 / coins3 / coins5 / coins10
+  (imágenes de los pases de monedas).
 -->
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-  html, body { margin: 0; padding: 0; background: #000; }
+  html, body { margin: 0; padding: 0; background: transparent; }
   svg { display: block; }
 </style>
 </head>
@@ -19,7 +21,8 @@ const TITLE = "PARKOUR";
 const SUBTITLE = "DE VELOCIDAD";
 
 const params = new URLSearchParams(location.search);
-const mode = ["thumb", "vip"].includes(params.get("mode")) ? params.get("mode") : "icon";
+const MODES = ["icon", "thumb", "vip", "coin", "coins2", "coins3", "coins5", "coins10"];
+const mode = MODES.includes(params.get("mode")) ? params.get("mode") : "icon";
 const W = mode === "thumb" ? 1920 : 512;
 const H = mode === "thumb" ? 1080 : 512;
 
@@ -358,7 +361,120 @@ function vip() {
   </svg>`;
 }
 
-const RENDER = { icon, thumb: thumbnail, vip };
+// Moneda del juego: dorada, con canto, rayo en el centro y brillo
+function coin(cx, cy, r) {
+  const bolt = [
+    [0.2, -0.9], [-0.45, 0.12], [-0.02, 0.12], [-0.22, 0.9], [0.48, -0.18], [0.05, -0.18], [0.28, -0.9],
+  ].map(([x, y]) => `${cx + x * r * 0.55},${cy + y * r * 0.55}`).join(" ");
+  const ridges = [];
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * Math.PI * 2;
+    const x1 = cx + Math.cos(a) * r * 0.86, y1 = cy + Math.sin(a) * r * 0.86;
+    const x2 = cx + Math.cos(a) * r * 0.95, y2 = cy + Math.sin(a) * r * 0.95;
+    ridges.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#b36b00" stroke-width="${r * 0.025}" opacity="0.55"/>`);
+  }
+  return `
+  <g>
+    <ellipse cx="${cx}" cy="${cy + r * 0.12}" rx="${r}" ry="${r}" fill="#8a4b00" stroke="#2a1600" stroke-width="${r * 0.06}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#coinRim)" stroke="#2a1600" stroke-width="${r * 0.06}"/>
+    ${ridges.join("")}
+    <circle cx="${cx}" cy="${cy}" r="${r * 0.8}" fill="url(#coinFace)" stroke="#c77700" stroke-width="${r * 0.05}"/>
+    <circle cx="${cx}" cy="${cy}" r="${r * 0.68}" fill="none" stroke="#fff3a8" stroke-width="${r * 0.025}" opacity="0.6"/>
+    <polygon points="${bolt}" fill="#b36b00" transform="translate(${r * 0.03} ${r * 0.04})"/>
+    <polygon points="${bolt}" fill="url(#boltFill)" stroke="#5a3300" stroke-width="${r * 0.04}" stroke-linejoin="round"/>
+    <path d="M ${cx - r * 0.62} ${cy - r * 0.2} A ${r * 0.66} ${r * 0.66} 0 0 1 ${cx + r * 0.1} ${cy - r * 0.64}"
+      fill="none" stroke="#ffffff" stroke-width="${r * 0.07}" stroke-linecap="round" opacity="0.55"/>
+    ${sparkle(cx + r * 0.62, cy - r * 0.62, r * 0.16, "#ffffff")}
+  </g>`;
+}
+
+function coinDefs(tier) {
+  return `
+  <defs>
+    <linearGradient id="coinRim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe680"/>
+      <stop offset="0.5" stop-color="#ffb300"/>
+      <stop offset="1" stop-color="#d17a00"/>
+    </linearGradient>
+    <radialGradient id="coinFace" cx="0.38" cy="0.35" r="0.8">
+      <stop offset="0" stop-color="#fff6b8"/>
+      <stop offset="0.5" stop-color="#ffd34d"/>
+      <stop offset="1" stop-color="#f0a000"/>
+    </radialGradient>
+    <linearGradient id="boltFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fff0a0"/>
+    </linearGradient>
+    ${tier ? `
+    <linearGradient id="tier" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.5" stop-color="${tier.light}"/>
+      <stop offset="1" stop-color="${tier.color}"/>
+    </linearGradient>
+    <radialGradient id="tierGlow" cx="0.5" cy="0.42" r="0.55">
+      <stop offset="0" stop-color="${tier.color}" stop-opacity="0.6"/>
+      <stop offset="0.6" stop-color="${tier.color}" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="${tier.color}" stop-opacity="0"/>
+    </radialGradient>` : ""}
+  </defs>`;
+}
+
+// Moneda sola, con fondo transparente (para usar en la interfaz)
+function coinIcon() {
+  return `
+  <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    ${defs()}
+    ${coinDefs()}
+    ${coin(256, 244, 210)}
+  </svg>`;
+}
+
+// Un color por nivel de pase
+const TIERS = {
+  coins2: { label: "x2", color: "#00a8ff", light: "#7fe9ff" },
+  coins3: { label: "x3", color: "#00c96b", light: "#8dffbf" },
+  coins5: { label: "x5", color: "#9b4dff", light: "#d6b3ff" },
+  coins10: { label: "x10", color: "#ff2e5b", light: "#ffb3c4" },
+};
+
+function coinPass() {
+  const tier = TIERS[mode];
+  const rays = [];
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const a2 = a + Math.PI / 32;
+    rays.push(`<polygon points="256,210 ${256 + Math.cos(a) * 400},${210 + Math.sin(a) * 400} ${256 + Math.cos(a2) * 400},${210 + Math.sin(a2) * 400}"
+      fill="${tier.light}" opacity="0.08"/>`);
+  }
+  // Monedas pequeñas alrededor: más cuanto más alto es el pase
+  const extra = { coins2: 2, coins3: 3, coins5: 5, coins10: 8 }[mode];
+  const small = [];
+  // Se reparten en arco a izquierda y derecha, sin taparse con la grande
+  const perSide = Math.ceil(extra / 2);
+  for (let i = 0; i < extra; i++) {
+    const right = i % 2 === 1;
+    const t = Math.floor(i / 2) / Math.max(1, perSide - 1);
+    const a = right ? Math.PI * 2 - t * Math.PI * 0.39 : Math.PI + t * Math.PI * 0.39;
+    small.push(coin(256 + Math.cos(a) * 190, 205 + Math.sin(a) * 162, 30 - Math.floor(i / 2) % 2 * 5));
+  }
+  return `
+  <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+    ${defs()}
+    ${coinDefs(tier)}
+    <rect width="${W}" height="${H}" fill="#140a2e"/>
+    <rect width="${W}" height="${H}" fill="url(#sky)" opacity="0.55"/>
+    ${rays.join("")}
+    <circle cx="256" cy="210" r="250" fill="url(#tierGlow)"/>
+    ${small.join("")}
+    <g filter="url(#shadow)">${coin(256, 205, 125)}</g>
+    ${titleText(256, 438, mode === "coins10" ? 138 : 150, tier.label, "url(#tier)", tier.color)}
+  </svg>`;
+}
+
+const RENDER = {
+  icon, thumb: thumbnail, vip, coin: coinIcon,
+  coins2: coinPass, coins3: coinPass, coins5: coinPass, coins10: coinPass,
+};
 document.getElementById("root").innerHTML = RENDER[mode]();
 </script>
 </body>

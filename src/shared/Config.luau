@@ -3,7 +3,7 @@
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "2.1",
+	Version = "2.2",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr

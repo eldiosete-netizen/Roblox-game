@@ -669,6 +669,37 @@ local function buildShopStand(lobby: Folder, base: Vector3, facing: Vector3)
 		Material = Enum.Material.Neon,
 		CanCollide = false,
 	}, spinner)
+	coin.Material = Enum.Material.Metal
+	coin.Reflectance = 0.15
+	-- Rayo en las dos caras, como en el diseño de la moneda
+	for _, face in { Enum.NormalId.Left, Enum.NormalId.Right } do
+		local gui = Instance.new("SurfaceGui")
+		gui.Face = face
+		gui.LightInfluence = 0
+		gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+		gui.PixelsPerStud = 60
+		gui.Parent = coin
+		local ring = Instance.new("Frame")
+		ring.AnchorPoint = Vector2.new(0.5, 0.5)
+		ring.Position = UDim2.fromScale(0.5, 0.5)
+		ring.Size = UDim2.fromScale(0.78, 0.78)
+		ring.BackgroundColor3 = Color3.fromRGB(255, 225, 110)
+		ring.Parent = gui
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0.5, 0)
+		corner.Parent = ring
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromRGB(200, 120, 0)
+		stroke.Thickness = 6
+		stroke.Parent = ring
+		local bolt = Instance.new("TextLabel")
+		bolt.Size = UDim2.fromScale(1, 1)
+		bolt.BackgroundTransparency = 1
+		bolt.Font = Enum.Font.GothamBlack
+		bolt.TextScaled = true
+		bolt.Text = "⚡"
+		bolt.Parent = ring
+	end
 	local light = Instance.new("PointLight")
 	light.Color = gold
 	light.Range = 14
