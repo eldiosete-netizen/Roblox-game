@@ -73,6 +73,7 @@ local function makeModel(): Model?
 			or descendant:IsA("Trail")
 			or descendant:IsA("Constraint")
 			or descendant:IsA("BillboardGui")
+			or descendant:IsA("Clothing")
 		then
 			descendant:Destroy()
 		elseif descendant:IsA("BasePart") then
@@ -88,9 +89,10 @@ local function makeModel(): Model?
 			descendant.Transparency = 1
 		end
 	end
+	-- Sin Humanoid: si lo tiene, Roblox vuelve a activar la colisión del torso y la cabeza
 	local humanoid = clone:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid:Destroy()
 	end
 	clone.Name = "Ghost"
 	clone.Parent = workspace

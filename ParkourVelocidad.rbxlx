@@ -105,7 +105,7 @@ return Catalog
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "1.8",
+	Version = "1.9",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -4210,6 +4210,7 @@ local function makeModel(): Model?
 			or descendant:IsA("Trail")
 			or descendant:IsA("Constraint")
 			or descendant:IsA("BillboardGui")
+			or descendant:IsA("Clothing")
 		then
 			descendant:Destroy()
 		elseif descendant:IsA("BasePart") then
@@ -4225,9 +4226,10 @@ local function makeModel(): Model?
 			descendant.Transparency = 1
 		end
 	end
+	-- Sin Humanoid: si lo tiene, Roblox vuelve a activar la colisión del torso y la cabeza
 	local humanoid = clone:FindFirstChildOfClass("Humanoid")
 	if humanoid then
-		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+		humanoid:Destroy()
 	end
 	clone.Name = "Ghost"
 	clone.Parent = workspace
