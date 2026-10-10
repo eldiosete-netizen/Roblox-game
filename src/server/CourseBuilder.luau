@@ -398,7 +398,7 @@ CourseBuilder.Definitions = {
 			DisplayName = "Neón",
 			Order = 2,
 			Color = THEMES.Neon.accent,
-			Price = 150,
+			Price = 3000,
 			Reward = 1.5, -- multiplicador de monedas del mapa
 		},
 		build = function(m)
@@ -458,7 +458,7 @@ CourseBuilder.Definitions = {
 			DisplayName = "Selva",
 			Order = 3,
 			Color = THEMES.Selva.accent,
-			Price = 400,
+			Price = 10000,
 			Reward = 2, -- multiplicador de monedas del mapa
 		},
 		build = function(m)

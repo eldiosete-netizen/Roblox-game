@@ -12,7 +12,7 @@ Juego de parkour contrarreloj: corre, desliza y salta por las paredes para conse
 **Contenido**
 - Lobby decorado: plaza con anillos holográficos, farolas, árboles, bancos, ciudad de neón de fondo
 - Portales a cada mapa y una pared de rankings detrás del spawn
-- 5 mapas, cada uno más largo y difícil que el anterior: Tutorial y Ciudad (gratis), Neón (150 monedas), Selva (400 monedas) y Cielo (solo VIP, el más largo y difícil)
+- 5 mapas, cada uno más largo y difícil que el anterior: Tutorial y Ciudad (gratis), Neón (3000 monedas), Selva (10000 monedas) y Cielo (solo VIP, el más largo y difícil)
 - Obstáculos: plataformas móviles, trampolines, tirolinas y zonas de gravedad baja
 - Medallas por mapa: bronce, plata, oro y desarrollador
 
