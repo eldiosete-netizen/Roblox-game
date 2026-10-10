@@ -105,7 +105,7 @@ return Catalog
 
 local Config = {
 	-- Versión del juego (se ve en el menú de inicio y abajo a la derecha)
-	Version = "1.7",
+	Version = "1.8",
 
 	-- Movimiento
 	BaseWalkSpeed = 16, -- velocidad al empezar a correr
@@ -386,6 +386,96 @@ return Sfx
       </Properties>
       <Item class="ModuleScript" referent="8">
         <Properties>
+          <string name="Name">BuildUtil</string>
+          <string name="Source"><![CDATA[-- Funciones para construir piezas del mundo (mapas, lobby y decoración).
+
+local BuildUtil = {}
+
+function BuildUtil.newPart(className: string, props: { [string]: any }, parent: Instance?): BasePart
+	local part = Instance.new(className) :: BasePart
+	part.Anchored = true
+	part.TopSurface = Enum.SurfaceType.Smooth
+	part.BottomSurface = Enum.SurfaceType.Smooth
+	part.Material = Enum.Material.SmoothPlastic
+	for key, value in props do
+		(part :: any)[key] = value
+	end
+	part.Parent = parent
+	return part
+end
+
+function BuildUtil.billboard(part: BasePart, text: string, size: Vector2, offset: Vector3, color: Color3?)
+	local gui = Instance.new("BillboardGui")
+	gui.Size = UDim2.fromScale(size.X, size.Y)
+	gui.StudsOffsetWorldSpace = offset
+	gui.MaxDistance = 120
+	gui.Parent = part
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.TextColor3 = color or Color3.new(1, 1, 1)
+	label.TextStrokeTransparency = 0.3
+	label.Text = text
+	label.Parent = gui
+end
+
+BuildUtil.DarkMetal = Color3.fromRGB(35, 38, 52)
+
+-- Partículas brillantes que flotan (portales y carrera en vivo)
+function BuildUtil.sparkles(parent: BasePart, color: Color3, direction: Enum.NormalId, rate: number)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	emitter.Color = ColorSequence.new(color)
+	emitter.LightEmission = 1
+	emitter.EmissionDirection = direction
+	emitter.Rate = rate
+	emitter.Lifetime = NumberRange.new(1.5, 2.5)
+	emitter.Speed = NumberRange.new(2, 5)
+	emitter.SpreadAngle = Vector2.new(25, 25)
+	emitter.Size = NumberSequence.new(0.5, 0)
+	emitter.Transparency = NumberSequence.new(0.2, 1)
+	emitter.Parent = parent
+end
+
+-- Cartel con fondo oscuro y borde de color en la cara frontal de una Part
+function BuildUtil.namePlate(part: BasePart, text: string, color: Color3)
+	local gui = Instance.new("SurfaceGui")
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = 50
+	gui.Parent = part
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.fromScale(1, 1)
+	frame.BackgroundColor3 = Color3.fromRGB(18, 20, 30)
+	frame.Parent = gui
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 18)
+	corner.Parent = frame
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = color
+	stroke.Thickness = 6
+	stroke.Parent = frame
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -40, 1, -20)
+	label.Position = UDim2.fromOffset(20, 10)
+	label.BackgroundTransparency = 1
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Text = text
+	label.Parent = frame
+end
+
+return BuildUtil
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="ModuleScript" referent="9">
+        <Properties>
           <string name="Name">CourseBuilder</string>
           <string name="Source"><![CDATA[-- Genera el lobby y los mapas si en Workspace no existe una carpeta "Maps".
 -- Puedes construir tus propios mapas en Studio con la estructura del README.
@@ -402,37 +492,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 
+local BuildUtil = require(script.Parent:WaitForChild("BuildUtil"))
+local LobbyDecor = require(script.Parent:WaitForChild("LobbyDecor"))
+
 local CourseBuilder = {}
 
-local function newPart(className: string, props: { [string]: any }, parent: Instance?): BasePart
-	local part = Instance.new(className) :: BasePart
-	part.Anchored = true
-	part.TopSurface = Enum.SurfaceType.Smooth
-	part.BottomSurface = Enum.SurfaceType.Smooth
-	part.Material = Enum.Material.SmoothPlastic
-	for key, value in props do
-		(part :: any)[key] = value
-	end
-	part.Parent = parent
-	return part
-end
-
-local function billboard(part: BasePart, text: string, size: Vector2, offset: Vector3, color: Color3?)
-	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromScale(size.X, size.Y)
-	gui.StudsOffsetWorldSpace = offset
-	gui.MaxDistance = 120
-	gui.Parent = part
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBlack
-	label.TextScaled = true
-	label.TextColor3 = color or Color3.new(1, 1, 1)
-	label.TextStrokeTransparency = 0.3
-	label.Text = text
-	label.Parent = gui
-end
+local newPart = BuildUtil.newPart
+local billboard = BuildUtil.billboard
+local sparkles = BuildUtil.sparkles
+local namePlate = BuildUtil.namePlate
+local DARK_METAL = BuildUtil.DarkMetal
 
 -- Constructor de un mapa ---------------------------------------------------------
 -- Coordenadas locales: x = lateral, h = altura sobre la base, el cursor avanza
@@ -896,55 +965,6 @@ CourseBuilder.Definitions = {
 
 -- Lobby ------------------------------------------------------------------------------
 
-local DARK_METAL = Color3.fromRGB(35, 38, 52)
-
--- Partículas brillantes que flotan (portales y carrera en vivo)
-local function sparkles(parent: BasePart, color: Color3, direction: Enum.NormalId, rate: number)
-	local emitter = Instance.new("ParticleEmitter")
-	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	emitter.Color = ColorSequence.new(color)
-	emitter.LightEmission = 1
-	emitter.EmissionDirection = direction
-	emitter.Rate = rate
-	emitter.Lifetime = NumberRange.new(1.5, 2.5)
-	emitter.Speed = NumberRange.new(2, 5)
-	emitter.SpreadAngle = Vector2.new(25, 25)
-	emitter.Size = NumberSequence.new(0.5, 0)
-	emitter.Transparency = NumberSequence.new(0.2, 1)
-	emitter.Parent = parent
-end
-
--- Cartel con fondo oscuro y borde de color en la cara frontal de una Part
-local function namePlate(part: BasePart, text: string, color: Color3)
-	local gui = Instance.new("SurfaceGui")
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = 50
-	gui.Parent = part
-
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.fromScale(1, 1)
-	frame.BackgroundColor3 = Color3.fromRGB(18, 20, 30)
-	frame.Parent = gui
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 18)
-	corner.Parent = frame
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = color
-	stroke.Thickness = 6
-	stroke.Parent = frame
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.new(1, -40, 1, -20)
-	label.Position = UDim2.fromOffset(20, 10)
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBlack
-	label.TextScaled = true
-	label.TextColor3 = Color3.new(1, 1, 1)
-	label.Text = text
-	label.Parent = frame
-end
-
 -- Portal con arco de neón, superficie de energía, luz, partículas y cartel con el nombre
 local function buildPortal(portals: Folder, map: Folder, base: Vector3)
 	local color = map:GetAttribute("Color") or Color3.new(1, 1, 1)
@@ -1247,6 +1267,8 @@ local function buildLobby(maps: { Folder }): Folder
 
 	buildLiveRacePad(lobby, Vector3.new(58, y, 0), Vector3.new(0, y, 20))
 
+	LobbyDecor.build(lobby, y)
+
 	lobby.Parent = workspace
 	return lobby
 end
@@ -1278,7 +1300,7 @@ return CourseBuilder
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="9">
+      <Item class="ModuleScript" referent="10">
         <Properties>
           <string name="Name">Economy</string>
           <string name="Source"><![CDATA[-- Monedas, XP y niveles: recompensas al terminar mapas y carreras en vivo.
@@ -1385,7 +1407,7 @@ return Economy
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="10">
+      <Item class="ModuleScript" referent="11">
         <Properties>
           <string name="Name">Ghosts</string>
           <string name="Source"><![CDATA[-- Guarda y envía el "fantasma" (tu mejor intento grabado) de cada mapa.
@@ -1495,7 +1517,7 @@ return Ghosts
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="11">
+      <Item class="ModuleScript" referent="12">
         <Properties>
           <string name="Name">Leaderboard</string>
           <string name="Source"><![CDATA[-- Ranking global por mapa (OrderedDataStore) y carteles del lobby.
@@ -1761,7 +1783,7 @@ return Leaderboard
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="12">
+      <Item class="ModuleScript" referent="13">
         <Properties>
           <string name="Name">LiveRace</string>
           <string name="Source"><![CDATA[-- Carreras en vivo: los jugadores en la cola corren a la vez en un mapa al azar.
@@ -1973,7 +1995,431 @@ return LiveRace
 ]]></string>
         </Properties>
       </Item>
-      <Item class="Script" referent="13">
+      <Item class="ModuleScript" referent="14">
+        <Properties>
+          <string name="Name">LobbyDecor</string>
+          <string name="Source"><![CDATA[-- Decoración del lobby: plaza central, suelo con rejilla de neón, muros con
+-- cristal, farolas, árboles, bancos, anillos holográficos, título gigante,
+-- ciudad de fondo e iluminación.
+--
+-- Distribución del lobby (y = altura del suelo):
+--   suelo x -85..85, z -75..65 · spawn (0, 20) · portales en z = -45
+--   carrera en vivo en (58, 0) · pared de rankings en z = 58
+
+local CollectionService = game:GetService("CollectionService")
+local Lighting = game:GetService("Lighting")
+
+local BuildUtil = require(script.Parent:WaitForChild("BuildUtil"))
+
+local newPart = BuildUtil.newPart
+local DARK_METAL = BuildUtil.DarkMetal
+
+local LobbyDecor = {}
+
+local FLOOR_MIN = Vector2.new(-85, -75) -- (x, z)
+local FLOOR_MAX = Vector2.new(85, 65)
+local SPAWN = Vector2.new(0, 20)
+
+local CYAN = Color3.fromRGB(0, 200, 255)
+local PURPLE = Color3.fromRGB(170, 80, 255)
+local FLAT = CFrame.Angles(0, 0, math.rad(90)) -- cilindro con el eje vertical
+
+-- Anillo hecho con segmentos (en el plano XY local de "frame")
+local function ring(parent: Instance, frame: CFrame, radius: number, thickness: number, color: Color3, segments: number)
+	local length = 2 * radius * math.sin(math.pi / segments) * 1.1
+	for k = 0, segments - 1 do
+		local angle = k / segments * math.pi * 2
+		newPart("Part", {
+			Name = "RingSegment",
+			Size = Vector3.new(thickness, length, thickness),
+			CFrame = frame * CFrame.new(radius * math.cos(angle), radius * math.sin(angle), 0) * CFrame.Angles(0, 0, angle),
+			Color = color,
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			CanQuery = false,
+			CanTouch = false,
+		}, parent)
+	end
+end
+
+-- Plaza central alrededor del spawn
+local function plaza(lobby: Folder, y: number)
+	local center = Vector3.new(SPAWN.X, y, SPAWN.Y)
+	newPart("Part", {
+		Name = "PlazaRing",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.12, 38, 38),
+		CFrame = CFrame.new(center + Vector3.new(0, 0.06, 0)) * FLAT,
+		Color = CYAN,
+		Material = Enum.Material.Neon,
+	}, lobby)
+	newPart("Part", {
+		Name = "Plaza",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.16, 36, 36),
+		CFrame = CFrame.new(center + Vector3.new(0, 0.08, 0)) * FLAT,
+		Color = Color3.fromRGB(32, 35, 50),
+		Material = Enum.Material.Slate,
+	}, lobby)
+
+	-- Anillos holográficos que giran sobre el spawn (los anima el cliente)
+	local hologram = Instance.new("Model")
+	hologram.Name = "Hologram"
+	local holoCenter = CFrame.new(center + Vector3.new(0, 16, 0))
+	ring(hologram, holoCenter, 6, 0.4, CYAN, 20)
+	ring(hologram, holoCenter * CFrame.Angles(math.rad(90), 0, 0), 4.5, 0.35, PURPLE, 16)
+	ring(hologram, holoCenter * CFrame.Angles(0, math.rad(90), 0), 3, 0.3, Color3.fromRGB(255, 205, 40), 14)
+	local core = newPart("Part", {
+		Name = "Core",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(2, 2, 2),
+		CFrame = holoCenter,
+		Color = Color3.new(1, 1, 1),
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+	}, hologram)
+	local light = Instance.new("PointLight")
+	light.Color = CYAN
+	light.Range = 24
+	light.Brightness = 1.5
+	light.Parent = core
+	hologram.PrimaryPart = core
+	hologram:SetAttribute("SpinSpeed", 25) -- grados por segundo
+	CollectionService:AddTag(hologram, "Spinner")
+	hologram.Parent = lobby
+end
+
+-- Rejilla de neón tenue en el suelo
+local function floorGrid(lobby: Folder, y: number)
+	local grid = Instance.new("Folder")
+	grid.Name = "FloorGrid"
+	grid.Parent = lobby
+	local props = {
+		Color = Color3.fromRGB(40, 90, 160),
+		Material = Enum.Material.Neon,
+		Transparency = 0.55,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+	}
+	for x = FLOOR_MIN.X + 10, FLOOR_MAX.X - 10, 20 do
+		props.Size = Vector3.new(0.25, 0.04, FLOOR_MAX.Y - FLOOR_MIN.Y - 4)
+		props.Position = Vector3.new(x, y + 0.02, (FLOOR_MIN.Y + FLOOR_MAX.Y) / 2)
+		newPart("Part", table.clone(props), grid)
+	end
+	for z = FLOOR_MIN.Y + 15, FLOOR_MAX.Y - 10, 20 do
+		props.Size = Vector3.new(FLOOR_MAX.X - FLOOR_MIN.X - 4, 0.04, 0.25)
+		props.Position = Vector3.new(0, y + 0.02, z)
+		newPart("Part", table.clone(props), grid)
+	end
+end
+
+-- Muro bajo con cristal y franja de neón alrededor del lobby
+local function perimeter(lobby: Folder, y: number)
+	local walls = Instance.new("Folder")
+	walls.Name = "Perimeter"
+	walls.Parent = lobby
+	local width = FLOOR_MAX.X - FLOOR_MIN.X
+	local depth = FLOOR_MAX.Y - FLOOR_MIN.Y
+	local midZ = (FLOOR_MIN.Y + FLOOR_MAX.Y) / 2
+	local sides = {
+		{ position = Vector3.new(0, 0, FLOOR_MIN.Y), size = Vector3.new(width, 0, 1) },
+		{ position = Vector3.new(0, 0, FLOOR_MAX.Y), size = Vector3.new(width, 0, 1) },
+		{ position = Vector3.new(FLOOR_MIN.X, 0, midZ), size = Vector3.new(1, 0, depth) },
+		{ position = Vector3.new(FLOOR_MAX.X, 0, midZ), size = Vector3.new(1, 0, depth) },
+	}
+	for _, side in sides do
+		local base = side.position + Vector3.new(0, y, 0)
+		newPart("Part", {
+			Name = "WallBase",
+			Size = side.size + Vector3.new(0, 3, 0),
+			Position = base + Vector3.new(0, 1.5, 0),
+			Color = DARK_METAL,
+			Material = Enum.Material.Metal,
+		}, walls)
+		newPart("Part", {
+			Name = "WallGlass",
+			Size = Vector3.new(math.max(side.size.X - 0.6, 0.4), 6, math.max(side.size.Z - 0.6, 0.4)),
+			Position = base + Vector3.new(0, 6, 0),
+			Color = Color3.fromRGB(120, 200, 255),
+			Material = Enum.Material.Glass,
+			Transparency = 0.75,
+		}, walls)
+		newPart("Part", {
+			Name = "WallGlow",
+			Size = side.size + Vector3.new(0, 0.3, 0) + Vector3.new(0.2, 0, 0.2),
+			Position = base + Vector3.new(0, 3.1, 0),
+			Color = CYAN,
+			Material = Enum.Material.Neon,
+		}, walls)
+	end
+end
+
+-- Farola de neón
+local function lamp(parent: Instance, position: Vector3, color: Color3)
+	newPart("Part", {
+		Name = "LampPost",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(10, 0.8, 0.8),
+		CFrame = CFrame.new(position + Vector3.new(0, 5, 0)) * FLAT,
+		Color = DARK_METAL,
+		Material = Enum.Material.Metal,
+	}, parent)
+	local head = newPart("Part", {
+		Name = "LampHead",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.new(1.8, 1.8, 1.8),
+		Position = position + Vector3.new(0, 10.5, 0),
+		Color = color,
+		Material = Enum.Material.Neon,
+	}, parent)
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Range = 16
+	light.Brightness = 1.2
+	light.Parent = head
+end
+
+local function lamps(lobby: Folder, y: number)
+	local folder = Instance.new("Folder")
+	folder.Name = "Lamps"
+	folder.Parent = lobby
+	local positions = {
+		-- A lo largo de los muros laterales
+		Vector2.new(-80, -50), Vector2.new(-80, -25), Vector2.new(-80, 10), Vector2.new(-80, 40),
+		Vector2.new(80, -50), Vector2.new(80, -25), Vector2.new(80, 25), Vector2.new(80, 40),
+		-- Alrededor de la plaza
+		Vector2.new(-20, 4), Vector2.new(20, 4), Vector2.new(-20, 36), Vector2.new(20, 36),
+	}
+	for i, p in positions do
+		lamp(folder, Vector3.new(p.X, y, p.Y), if i % 2 == 0 then CYAN else PURPLE)
+	end
+end
+
+-- Árbol estilizado en una jardinera
+local function tree(parent: Instance, position: Vector3, scale: number)
+	newPart("Part", {
+		Name = "Planter",
+		Size = Vector3.new(6, 1.6, 6),
+		Position = position + Vector3.new(0, 0.8, 0),
+		Color = DARK_METAL,
+		Material = Enum.Material.Metal,
+	}, parent)
+	newPart("Part", {
+		Name = "PlanterGlow",
+		Size = Vector3.new(6.2, 0.2, 6.2),
+		Position = position + Vector3.new(0, 1.6, 0),
+		Color = Color3.fromRGB(0, 230, 120),
+		Material = Enum.Material.Neon,
+	}, parent)
+	newPart("Part", {
+		Name = "Soil",
+		Size = Vector3.new(5.2, 0.2, 5.2),
+		Position = position + Vector3.new(0, 1.65, 0),
+		Color = Color3.fromRGB(60, 45, 35),
+		Material = Enum.Material.Ground,
+	}, parent)
+	newPart("Part", {
+		Name = "Trunk",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(7 * scale, 1, 1),
+		CFrame = CFrame.new(position + Vector3.new(0, 1.6 + 3.5 * scale, 0)) * FLAT,
+		Color = Color3.fromRGB(95, 65, 45),
+		Material = Enum.Material.Wood,
+	}, parent)
+	local leaves = {
+		{ Vector3.new(0, 8, 0), 6 },
+		{ Vector3.new(1.6, 6.8, 0.8), 4.2 },
+		{ Vector3.new(-1.4, 7, -1), 4.4 },
+	}
+	for _, leaf in leaves do
+		newPart("Part", {
+			Name = "Leaves",
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.one * leaf[2] * scale,
+			Position = position + leaf[1] * scale + Vector3.new(0, 1.6, 0),
+			Color = Color3.fromRGB(60, 170, 90),
+			Material = Enum.Material.Grass,
+		}, parent)
+	end
+end
+
+-- Banco en el que los jugadores pueden sentarse
+local function bench(parent: Instance, position: Vector3, lookAt: Vector3)
+	local frame = CFrame.lookAt(position, Vector3.new(lookAt.X, position.Y, lookAt.Z))
+	local seat = Instance.new("Seat")
+	seat.Name = "Bench"
+	seat.Anchored = true
+	seat.Size = Vector3.new(6, 0.5, 2)
+	seat.CFrame = frame * CFrame.new(0, 1.6, 0)
+	seat.Color = Color3.fromRGB(120, 85, 60)
+	seat.Material = Enum.Material.Wood
+	seat.TopSurface = Enum.SurfaceType.Smooth
+	seat.Parent = parent
+	newPart("Part", {
+		Name = "BenchBack",
+		Size = Vector3.new(6, 2, 0.4),
+		CFrame = frame * CFrame.new(0, 2.8, 0.9),
+		Color = Color3.fromRGB(120, 85, 60),
+		Material = Enum.Material.Wood,
+	}, parent)
+	for _, side in { -2.5, 2.5 } do
+		newPart("Part", {
+			Name = "BenchLeg",
+			Size = Vector3.new(0.4, 1.4, 1.8),
+			CFrame = frame * CFrame.new(side, 0.7, 0),
+			Color = DARK_METAL,
+			Material = Enum.Material.Metal,
+		}, parent)
+	end
+end
+
+local function garden(lobby: Folder, y: number)
+	local folder = Instance.new("Folder")
+	folder.Name = "Garden"
+	folder.Parent = lobby
+	local trees = {
+		{ Vector2.new(-30, 22), 1 },
+		{ Vector2.new(30, 22), 1 },
+		{ Vector2.new(-74, 52), 1.3 },
+		{ Vector2.new(74, 52), 1.3 },
+		{ Vector2.new(-76, -66), 1.3 },
+		{ Vector2.new(76, -66), 1.3 },
+		{ Vector2.new(-74, -10), 1.1 },
+	}
+	for _, t in trees do
+		tree(folder, Vector3.new(t[1].X, y, t[1].Y), t[2])
+	end
+	local plaza = Vector3.new(SPAWN.X, y, SPAWN.Y)
+	for _, p in { Vector2.new(-30, 12), Vector2.new(30, 12), Vector2.new(-30, 32), Vector2.new(30, 32) } do
+		bench(folder, Vector3.new(p.X, y, p.Y), plaza)
+	end
+end
+
+-- Título gigante sobre los portales
+local function title(lobby: Folder, y: number)
+	local center = Vector3.new(0, y + 36, -50)
+	local sign = newPart("Part", {
+		Name = "Title",
+		Size = Vector3.new(70, 9, 1),
+		CFrame = CFrame.lookAt(center, center + Vector3.new(0, 0, 1)),
+		Color = DARK_METAL,
+	}, lobby)
+	BuildUtil.namePlate(sign, "PARKOUR DE VELOCIDAD", CYAN)
+	for _, side in { -1, 1 } do
+		newPart("Part", {
+			Name = "TitleCable",
+			Size = Vector3.new(0.3, 30, 0.3),
+			Position = center + Vector3.new(side * 30, 19, 0),
+			Color = DARK_METAL,
+			Material = Enum.Material.Metal,
+			CanCollide = false,
+		}, lobby)
+	end
+end
+
+-- Edificios con franjas de neón alrededor del lobby (solo decorado)
+local function skyline(lobby: Folder, y: number)
+	local folder = Instance.new("Folder")
+	folder.Name = "Skyline"
+	folder.Parent = lobby
+	local random = Random.new(2024)
+	local colors = { CYAN, PURPLE, Color3.fromRGB(255, 80, 180), Color3.fromRGB(255, 205, 40) }
+	local count = 28
+	for i = 1, count do
+		local angle = (i / count) * math.pi * 2 + random:NextNumber(-0.08, 0.08)
+		local distance = random:NextNumber(150, 210)
+		local width = random:NextNumber(18, 34)
+		local depth = random:NextNumber(18, 34)
+		local height = random:NextNumber(40, 140)
+		local base = Vector3.new(math.cos(angle) * distance, y - 60, math.sin(angle) * distance)
+		local totalHeight = height + 60
+		local frame = CFrame.lookAt(base, Vector3.new(0, base.Y, 0)) * CFrame.new(0, totalHeight / 2, 0)
+
+		newPart("Part", {
+			Name = "Building",
+			Size = Vector3.new(width, totalHeight, depth),
+			CFrame = frame,
+			Color = Color3.fromRGB(22 + random:NextInteger(0, 12), 24 + random:NextInteger(0, 12), 38 + random:NextInteger(0, 16)),
+			Material = Enum.Material.Concrete,
+			CanCollide = false,
+			CanQuery = false,
+			CanTouch = false,
+			CastShadow = false,
+		}, folder)
+
+		local color = colors[random:NextInteger(1, #colors)]
+		local bands = random:NextInteger(2, 5)
+		for b = 1, bands do
+			local bandY = 60 + height * (b / (bands + 1)) - totalHeight / 2
+			newPart("Part", {
+				Name = "NeonBand",
+				Size = Vector3.new(width + 0.4, 0.6, depth + 0.4),
+				CFrame = frame * CFrame.new(0, bandY, 0),
+				Color = color,
+				Material = Enum.Material.Neon,
+				CanCollide = false,
+				CanQuery = false,
+				CanTouch = false,
+				CastShadow = false,
+			}, folder)
+		end
+		-- Luz roja en lo alto de los edificios más altos
+		if height > 100 then
+			newPart("Part", {
+				Name = "Beacon",
+				Shape = Enum.PartType.Ball,
+				Size = Vector3.new(2, 2, 2),
+				CFrame = frame * CFrame.new(0, totalHeight / 2 + 1, 0),
+				Color = Color3.fromRGB(255, 50, 50),
+				Material = Enum.Material.Neon,
+				CanCollide = false,
+				CanQuery = false,
+				CanTouch = false,
+			}, folder)
+		end
+	end
+end
+
+-- Atardecer con algo de brillo para que destaque el neón.
+-- Solo añade efectos si el juego no tiene ya los suyos.
+function LobbyDecor.applyLighting()
+	Lighting.ClockTime = 17.6
+	Lighting.Brightness = 2
+	Lighting.OutdoorAmbient = Color3.fromRGB(110, 110, 140)
+	if not Lighting:FindFirstChildOfClass("Atmosphere") then
+		local atmosphere = Instance.new("Atmosphere")
+		atmosphere.Density = 0.3
+		atmosphere.Haze = 1.5
+		atmosphere.Color = Color3.fromRGB(200, 170, 220)
+		atmosphere.Decay = Color3.fromRGB(110, 80, 140)
+		atmosphere.Parent = Lighting
+	end
+	if not Lighting:FindFirstChildOfClass("BloomEffect") then
+		local bloom = Instance.new("BloomEffect")
+		bloom.Intensity = 0.7
+		bloom.Size = 24
+		bloom.Threshold = 1.6
+		bloom.Parent = Lighting
+	end
+end
+
+function LobbyDecor.build(lobby: Folder, y: number)
+	plaza(lobby, y)
+	floorGrid(lobby, y)
+	perimeter(lobby, y)
+	lamps(lobby, y)
+	garden(lobby, y)
+	title(lobby, y)
+	skyline(lobby, y)
+	LobbyDecor.applyLighting()
+end
+
+return LobbyDecor
+]]></string>
+        </Properties>
+      </Item>
+      <Item class="Script" referent="15">
         <Properties>
           <string name="Name">Main</string>
           <token name="RunContext">0</token>
@@ -2066,7 +2512,7 @@ end)
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="14">
+      <Item class="ModuleScript" referent="16">
         <Properties>
           <string name="Name">Maps</string>
           <string name="Source"><![CDATA[-- Registro de mapas: lee Workspace/Maps (o los genera) y el lobby.
@@ -2194,7 +2640,7 @@ return Maps
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="15">
+      <Item class="ModuleScript" referent="17">
         <Properties>
           <string name="Name">PlayerData</string>
           <string name="Source"><![CDATA[-- Datos guardados de cada jugador (DataStore) y sincronización con su cliente.
@@ -2425,7 +2871,7 @@ return PlayerData
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="16">
+      <Item class="ModuleScript" referent="18">
         <Properties>
           <string name="Name">RaceService</string>
           <string name="Source"><![CDATA[-- Lógica de las carreras: entrar en mapas, cuenta atrás, checkpoints, meta,
@@ -2884,7 +3330,7 @@ return RaceService
 ]]></string>
         </Properties>
       </Item>
-      <Item class="ModuleScript" referent="17">
+      <Item class="ModuleScript" referent="19">
         <Properties>
           <string name="Name">Shop</string>
           <string name="Source"><![CDATA[-- Tienda de cosméticos, VIP (Game Pass) y efectos visibles para todos (rastro).
@@ -3087,19 +3533,19 @@ return Shop
       </Item>
     </Item>
   </Item>
-  <Item class="StarterPlayer" referent="18">
+  <Item class="StarterPlayer" referent="20">
     <Properties>
       <string name="Name">StarterPlayer</string>
     </Properties>
-    <Item class="StarterCharacterScripts" referent="19">
+    <Item class="StarterCharacterScripts" referent="21">
       <Properties>
         <string name="Name">StarterCharacterScripts</string>
       </Properties>
-      <Item class="Folder" referent="20">
+      <Item class="Folder" referent="22">
         <Properties>
           <string name="Name">Character</string>
         </Properties>
-        <Item class="LocalScript" referent="21">
+        <Item class="LocalScript" referent="23">
           <Properties>
             <string name="Name">Effects</string>
             <string name="Source"><![CDATA[-- Efectos visuales y de sonido del movimiento: poses, partículas de salto y
@@ -3305,7 +3751,7 @@ character.Destroying:Connect(cleanup)
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="22">
+        <Item class="LocalScript" referent="24">
           <Properties>
             <string name="Name">Movement</string>
             <string name="Source"><![CDATA[-- Movimiento de parkour: momentum al correr, deslizamiento, wall run y wall jump.
@@ -3604,15 +4050,15 @@ humanoid.Died:Connect(cleanup)
         </Item>
       </Item>
     </Item>
-    <Item class="StarterPlayerScripts" referent="23">
+    <Item class="StarterPlayerScripts" referent="25">
       <Properties>
         <string name="Name">StarterPlayerScripts</string>
       </Properties>
-      <Item class="Folder" referent="24">
+      <Item class="Folder" referent="26">
         <Properties>
           <string name="Name">Client</string>
         </Properties>
-        <Item class="ModuleScript" referent="25">
+        <Item class="ModuleScript" referent="27">
           <Properties>
             <string name="Name">ClientState</string>
             <string name="Source"><![CDATA[-- Datos del jugador en el cliente (los envía el servidor con DataSync).
@@ -3686,7 +4132,7 @@ return ClientState
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="26">
+        <Item class="ModuleScript" referent="28">
           <Properties>
             <string name="Name">Ghost</string>
             <string name="Source"><![CDATA[-- Modo fantasma: graba tu carrera y, en el siguiente intento, muestra una
@@ -3884,7 +4330,7 @@ return Ghost
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="27">
+        <Item class="ModuleScript" referent="29">
           <Properties>
             <string name="Name">HUD</string>
             <string name="Source"><![CDATA[-- Interfaz de la carrera: cronómetro, parciales, medallas, cuenta atrás,
@@ -4381,7 +4827,7 @@ return HUD
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="28">
+        <Item class="ModuleScript" referent="30">
           <Properties>
             <string name="Name">LiveRaceUI</string>
             <string name="Source"><![CDATA[-- Interfaz de la carrera en vivo: banner con el estado y botón para unirse.
@@ -4479,7 +4925,7 @@ return LiveRaceUI
 ]]></string>
           </Properties>
         </Item>
-        <Item class="LocalScript" referent="29">
+        <Item class="LocalScript" referent="31">
           <Properties>
             <string name="Name">Main</string>
             <string name="Source"><![CDATA[-- Arranque del cliente: pone en marcha la interfaz y los sistemas locales.
@@ -4508,7 +4954,7 @@ Ghost.start()
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="30">
+        <Item class="ModuleScript" referent="32">
           <Properties>
             <string name="Name">MapMenu</string>
             <string name="Source"><![CDATA[-- Selector de mapas: tu mejor tiempo, medallas conseguidas y tiempos objetivo.
@@ -4699,7 +5145,7 @@ return MapMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="31">
+        <Item class="ModuleScript" referent="33">
           <Properties>
             <string name="Name">Obstacles</string>
             <string name="Source"><![CDATA[-- Obstáculos especiales (los simula cada cliente para que vayan suaves):
@@ -4707,6 +5153,7 @@ return MapMenu
 --   Trampoline: te lanza hacia arriba
 --   Zipline: salta hacia el cable para engancharte; Espacio para soltarte
 --   LowGravity: dentro de la zona la gravedad es menor
+--   Spinner: modelo decorativo que gira y flota (atributo SpinSpeed en grados/s)
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -4907,6 +5354,29 @@ local function updateGravity()
 	end
 end
 
+-- Decoración que gira ------------------------------------------------------------------------
+
+local spinners: { [Model]: { base: CFrame, speed: number } } = {}
+
+local function addSpinner(model: Instance)
+	if model:IsA("Model") then
+		spinners[model] = { base = model:GetPivot(), speed = model:GetAttribute("SpinSpeed") or 30 }
+	end
+end
+
+local function updateSpinners()
+	local now = workspace:GetServerTimeNow()
+	for model, spinner in spinners do
+		if not model.Parent then
+			spinners[model] = nil
+			continue
+		end
+		local angle = math.rad(now * spinner.speed)
+		local bob = math.sin(now * 1.5) * 0.6
+		model:PivotTo(spinner.base * CFrame.new(0, bob, 0) * CFrame.Angles(angle * 0.3, angle, 0))
+	end
+end
+
 -- Inicio ---------------------------------------------------------------------------------
 
 local function onCharacter(newCharacter: Model)
@@ -4940,6 +5410,8 @@ function Obstacles.start()
 	watchTag("Trampoline", addTrampoline)
 	watchTag("Zipline", addZipline)
 	watchTag("LowGravity", addZone)
+	watchTag("Spinner", addSpinner)
+	RunService.RenderStepped:Connect(updateSpinners)
 
 	if player.Character then
 		task.spawn(onCharacter, player.Character)
@@ -4984,7 +5456,7 @@ return Obstacles
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="32">
+        <Item class="ModuleScript" referent="34">
           <Properties>
             <string name="Name">RankingsMenu</string>
             <string name="Source"><![CDATA[-- Panel de rankings: top de cada mapa (histórico y semanal) desde cualquier sitio.
@@ -5142,7 +5614,7 @@ return RankingsMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="33">
+        <Item class="ModuleScript" referent="35">
           <Properties>
             <string name="Name">SettingsMenu</string>
             <string name="Source"><![CDATA[-- Ajustes del jugador (se guardan en su cuenta).
@@ -5230,7 +5702,7 @@ return SettingsMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="34">
+        <Item class="ModuleScript" referent="36">
           <Properties>
             <string name="Name">ShopMenu</string>
             <string name="Source"><![CDATA[-- Tienda: rastros, efectos de salto y de deslizamiento, y el pase VIP.
@@ -5448,7 +5920,7 @@ return ShopMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="35">
+        <Item class="ModuleScript" referent="37">
           <Properties>
             <string name="Name">StartMenu</string>
             <string name="Source"><![CDATA[-- Menú de inicio: aparece al entrar al juego.
@@ -5585,7 +6057,7 @@ return StartMenu
 ]]></string>
           </Properties>
         </Item>
-        <Item class="ModuleScript" referent="36">
+        <Item class="ModuleScript" referent="38">
           <Properties>
             <string name="Name">UI</string>
             <string name="Source"><![CDATA[-- Pequeña librería para crear la interfaz con un estilo común.
@@ -5766,7 +6238,7 @@ return UI
       </Item>
     </Item>
   </Item>
-  <Item class="Workspace" referent="37">
+  <Item class="Workspace" referent="39">
     <Properties>
       <string name="Name">Workspace</string>
       <bool name="NeedsPivotMigration">false</bool>

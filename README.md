@@ -10,7 +10,8 @@ Juego de parkour contrarreloj: corre, desliza y salta por las paredes para conse
 - Poses al deslizar y en la pared, cámara que reacciona a la velocidad
 
 **Contenido**
-- Lobby con portales a cada mapa y ranking encima de cada portal
+- Lobby decorado: plaza con anillos holográficos, farolas, árboles, bancos, ciudad de neón de fondo
+- Portales a cada mapa y una pared de rankings detrás del spawn
 - 5 mapas: Tutorial, Ciudad, Neón, Selva y Cielo (VIP)
 - Obstáculos: plataformas móviles, trampolines, tirolinas y zonas de gravedad baja
 - Medallas por mapa: bronce, plata, oro y desarrollador
@@ -73,6 +74,8 @@ src/shared/      (ReplicatedStorage.Shared)
 src/server/      (ServerScriptService.Server)
   Main           arranque del servidor
   CourseBuilder  genera el lobby y los mapas
+  LobbyDecor     decoración del lobby e iluminación
+  BuildUtil      funciones para crear piezas, carteles y partículas
   Maps           registro de mapas
   RaceService    carreras: cuenta atrás, checkpoints, meta, caídas
   PlayerData     datos guardados del jugador

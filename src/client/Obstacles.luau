@@ -3,6 +3,7 @@
 --   Trampoline: te lanza hacia arriba
 --   Zipline: salta hacia el cable para engancharte; Espacio para soltarte
 --   LowGravity: dentro de la zona la gravedad es menor
+--   Spinner: modelo decorativo que gira y flota (atributo SpinSpeed en grados/s)
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -203,6 +204,29 @@ local function updateGravity()
 	end
 end
 
+-- Decoración que gira ------------------------------------------------------------------------
+
+local spinners: { [Model]: { base: CFrame, speed: number } } = {}
+
+local function addSpinner(model: Instance)
+	if model:IsA("Model") then
+		spinners[model] = { base = model:GetPivot(), speed = model:GetAttribute("SpinSpeed") or 30 }
+	end
+end
+
+local function updateSpinners()
+	local now = workspace:GetServerTimeNow()
+	for model, spinner in spinners do
+		if not model.Parent then
+			spinners[model] = nil
+			continue
+		end
+		local angle = math.rad(now * spinner.speed)
+		local bob = math.sin(now * 1.5) * 0.6
+		model:PivotTo(spinner.base * CFrame.new(0, bob, 0) * CFrame.Angles(angle * 0.3, angle, 0))
+	end
+end
+
 -- Inicio ---------------------------------------------------------------------------------
 
 local function onCharacter(newCharacter: Model)
@@ -236,6 +260,8 @@ function Obstacles.start()
 	watchTag("Trampoline", addTrampoline)
 	watchTag("Zipline", addZipline)
 	watchTag("LowGravity", addZone)
+	watchTag("Spinner", addSpinner)
+	RunService.RenderStepped:Connect(updateSpinners)
 
 	if player.Character then
 		task.spawn(onCharacter, player.Character)
